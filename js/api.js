@@ -295,14 +295,14 @@
     let ok = 0;
     for (const phrase of NOMINATIM_PHRASES) {
       if (signal.aborted) break;
-      const url = CFG.nominatim + "/search?format=jsonv2&limit=40&bounded=1&accept-language=uz,ru,en" +
+      const url = CFG.nominatim + "/search?format=jsonv2&limit=40&bounded=1&extratags=1&namedetails=1&accept-language=uz,ru,en" +
         "&viewbox=" + viewbox + "&q=" + encodeURIComponent(phrase);
       try {
         const d = await nominatimQueue(() => fetchJSON(url, { signal }, 12000));
         ok++;
         for (const r of d || []) {
           elements.push({ type: r.osm_type || "node", id: r.osm_id || r.place_id, lat: Number(r.lat), lon: Number(r.lon),
-            tags: { [r.category]: r.type, name: r.name || "" } });
+            tags: Object.assign({}, r.extratags || {}, r.namedetails || {}, { [r.category]: r.type, name: r.name || "" }) });
         }
       } catch (e) {
         errors.push("nominatim (" + phrase + "): " + e.message);
@@ -379,16 +379,124 @@
       if (seen.has(key)) continue;
       seen.add(key);
       const dist = global.Geo.haversine(center, { lat: plat, lon: plon });
+      const y = Math.sin((plon - lon) * Math.PI / 180) * Math.cos(plat * Math.PI / 180);
+      const x = Math.cos(lat * Math.PI / 180) * Math.sin(plat * Math.PI / 180) -
+        Math.sin(lat * Math.PI / 180) * Math.cos(plat * Math.PI / 180) * Math.cos((plon - lon) * Math.PI / 180);
+      const bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
       if (dist > radius * 1.05) continue;
       groups[gi].items.push({
+        key: el.type + "/" + el.id,
         name: t["name:uz"] || t.name || t["name:ru"] || t["name:en"] || "",
         kind: t.amenity || t.tourism || t.historic || t.shop || t.leisure || t.railway || "",
         tags: t,
-        lat: plat, lon: plon, dist,
+        lat: plat, lon: plon, dist, bearing,
       });
     }
     for (const g of groups) g.items.sort((a, b) => a.dist - b.dist);
     return { radius, groups, total: groups.reduce((s, g) => s + g.items.length, 0) };
+  }
+
+
+  /* ---------- Obyektlar uchun rasm va tavsif (Wikidata / Vikipediya) ---------- */
+
+  const wdCache = new Map();   // Q-id -> {image, desc, wiki}
+  const wpCache = new Map();   // "lang:Title" -> {image, extract, url}
+  const LANGS = ["uz", "ru", "en"];
+
+  async function fetchWikidata(ids) {
+    const need = ids.filter((id) => !wdCache.has(id));
+    for (let i = 0; i < need.length; i += 25) {
+      const batch = need.slice(i, i + 25);
+      try {
+        const d = await fetchJSON("https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&origin=*" +
+          "&props=claims%7Cdescriptions%7Csitelinks&languages=uz%7Cru%7Cen&ids=" + batch.join("%7C"), null, 15000);
+        for (const id of batch) {
+          const e = d.entities && d.entities[id];
+          if (!e || e.missing !== undefined) { wdCache.set(id, null); continue; }
+          const p18 = e.claims && e.claims.P18 && e.claims.P18[0] && e.claims.P18[0].mainsnak.datavalue;
+          const desc = LANGS.map((l) => e.descriptions && e.descriptions[l] && e.descriptions[l].value).find(Boolean) || "";
+          let wiki = "";
+          for (const l of LANGS) {
+            const sl = e.sitelinks && e.sitelinks[l + "wiki"];
+            if (sl) { wiki = l + ":" + sl.title; break; }
+          }
+          wdCache.set(id, { image: p18 ? p18.value : "", desc, wiki });
+        }
+      } catch (e) {
+        console.warn("Wikidata xatosi:", e);
+        batch.forEach((id) => { if (!wdCache.has(id)) wdCache.set(id, null); });
+      }
+    }
+  }
+
+  async function fetchWikipedia(ref) {
+    if (wpCache.has(ref)) return wpCache.get(ref);
+    const m = ref.match(/^([a-z-]{2,12}):(.+)$/);
+    if (!m) { wpCache.set(ref, null); return null; }
+    const [, lang, title] = m;
+    let out = null;
+    try {
+      const d = await fetchJSON("https://" + lang + ".wikipedia.org/api/rest_v1/page/summary/" +
+        encodeURIComponent(title.replace(/ /g, "_")), null, 12000);
+      out = {
+        image: d.thumbnail ? d.thumbnail.source : "",
+        extract: d.extract || "",
+        url: d.content_urls ? d.content_urls.desktop.page : "https://" + lang + ".wikipedia.org/wiki/" + encodeURIComponent(title),
+      };
+    } catch (e) {
+      console.warn("Vikipediya xatosi:", e);
+    }
+    wpCache.set(ref, out);
+    return out;
+  }
+
+  /**
+   * Ko'rsatilayotgan obyektlarga rasm va tavsif qo'shadi (it.extra).
+   * Qaytaradi: hech bo'lmasa bitta obyekt o'zgardimi.
+   */
+  async function enrichPOIs(items) {
+    const todo = items.filter((it) => !it.extra);
+    if (!todo.length) return false;
+    const ids = Array.from(new Set(todo.map((it) => (it.tags.wikidata || "").trim()).filter((id) => /^Q\d+$/.test(id))));
+    if (ids.length) await fetchWikidata(ids);
+    const wpRefs = [];
+    for (const it of todo) {
+      const wd = it.tags.wikidata ? wdCache.get(it.tags.wikidata.trim()) : null;
+      it.extra = { image: "", desc: "", extract: "", wikiUrl: "" };
+      if (wd) {
+        if (wd.image) it.extra.image = commonsThumb(wd.image);
+        it.extra.desc = wd.desc;
+      }
+      const ref = (it.tags.wikipedia || (wd && wd.wiki) || "").trim();
+      if (ref) wpRefs.push([it, ref]);
+    }
+    // Vikipediya xulosalari (bir vaqtda ko'pi bilan 4 ta so'rov)
+    let i = 0;
+    const worker = async () => {
+      while (i < wpRefs.length) {
+        const [it, ref] = wpRefs[i++];
+        const wp = await fetchWikipedia(ref);
+        if (!wp) continue;
+        if (!it.extra.image && wp.image) it.extra.image = wp.image;
+        it.extra.extract = wp.extract;
+        it.extra.wikiUrl = wp.url;
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    return true;
+  }
+
+  function commonsThumb(file, width) {
+    const name = String(file).replace(/^(File|Fayl|Файл|Image):/i, "").trim();
+    return "https://commons.wikimedia.org/wiki/Special:FilePath/" + encodeURIComponent(name.replace(/ /g, "_")) + "?width=" + (width || 240);
+  }
+
+  /** Nuqtaning sun'iy yo'ldosh surati (Esri World Imagery, ~170 m × 130 m). */
+  function satelliteThumb(lat, lon) {
+    const dLat = 0.0006, dLon = 0.0006 / Math.cos(lat * Math.PI / 180) * 1.33;
+    const bbox = [lon - dLon, lat - dLat, lon + dLon, lat + dLat].map((v) => v.toFixed(6)).join(",");
+    return "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=" + bbox +
+      "&bboxSR=4326&imageSR=3857&size=240,180&format=jpg&f=image";
   }
 
   /* ---------- Wikipedia ---------- */
@@ -439,5 +547,5 @@
     }
   }
 
-  global.API = { search, reverse, matrix, route, nearby, diagnose, wiki, weather, estimateMatrix, POI_GROUPS, groupPOIs, CFG };
+  global.API = { search, reverse, matrix, route, nearby, diagnose, enrichPOIs, commonsThumb, satelliteThumb, wiki, weather, estimateMatrix, POI_GROUPS, groupPOIs, CFG };
 })(window);

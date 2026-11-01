@@ -774,6 +774,13 @@
     });
   }
 
+  // "Atrofda" bo'limida qaysi guruhlar ochiq / to'liq ko'rsatilgan (har bir manzil uchun alohida)
+  const aroundUI = new Map();
+  function uiFor(id) {
+    if (!aroundUI.has(id)) aroundUI.set(id, { open: null, expanded: new Set() });
+    return aroundUI.get(id);
+  }
+
   function renderAroundTab() {
     const p = findPlace(drawerId);
     if (!p) return;
@@ -784,7 +791,21 @@
     if (!nb || nb.loading) { body.innerHTML = '<p class="muted loading-line"><span class="spinner sm"></span>Atrofdagi obyektlar qidirilmoqda… Bu 5–30 soniya olishi mumkin.</p>'; if (!nb) loadNearby(p, r); return; }
     if (nb.error) { body.innerHTML = '<p class="muted">Maʼlumot olinmadi: ' + esc(nb.error) + ' <button class="link-btn" id="btn-retry-nb" type="button">Qayta urinish</button></p>';
       $("#btn-retry-nb").onclick = () => { delete d.nearby[r]; renderAroundTab(); }; return; }
-    body.innerHTML = Place.renderAround(nb.data);
+    const ui = uiFor(p.id);
+    if (!ui.open) {
+      ui.open = new Set(nb.data.groups.filter((g) => g.items.length).slice(0, 2).map((g) => g.id));
+    }
+    const scroll = $(".drawer-body").scrollTop;
+    body.innerHTML = Place.renderAround(nb.data, ui);
+    $(".drawer-body").scrollTop = scroll;
+    // Ko'rinayotgan obyektlar uchun surat va tavsif yuklash
+    const vis = Place.visiblePOIs(nb.data, ui).filter((it) => !it.extra);
+    if (vis.length) {
+      const pid = p.id;
+      API.enrichPOIs(vis).then((changed) => {
+        if (changed && drawerId === pid && radius() === r && !$('[data-pane="around"]').hidden) renderAroundTab();
+      });
+    }
   }
 
   $("#radius").onchange = () => {
@@ -796,16 +817,53 @@
   };
 
   $("#around-body").addEventListener("click", (e) => {
-    const b = e.target.closest(".poi-item");
+    const more = e.target.closest(".poi-more");
+    if (more) {
+      const ui = uiFor(drawerId);
+      const g = more.dataset.group;
+      if (ui.expanded.has(g)) ui.expanded.delete(g); else ui.expanded.add(g);
+      renderAroundTab();
+      return;
+    }
+    const b = e.target.closest('[data-act="show"]');
     if (!b) return;
-    const lat = Number(b.dataset.lat), lon = Number(b.dataset.lon);
+    const card = b.closest(".poi-card");
+    const lat = Number(card.dataset.lat), lon = Number(card.dataset.lon);
     poiLayer.clearLayers();
     L.circleMarker([lat, lon], { radius: 8, color: "#fff", weight: 2, fillColor: "#e0412b", fillOpacity: 1 })
-      .bindTooltip(b.querySelector("span").textContent, { permanent: true, direction: "top", offset: [0, -8] })
+      .bindTooltip(card.dataset.name, { permanent: true, direction: "top", offset: [0, -8] })
       .addTo(poiLayer);
     map.setView([lat, lon], Math.max(map.getZoom(), 16));
     if (miniMap && !$("#mini-map").hidden) miniMap.setView([lat, lon], 17);
+    $$(".poi-card.active").forEach((c) => c.classList.remove("active"));
+    card.classList.add("active");
   });
+
+  // Guruh ochilganda/yopilganda holatni eslab qolish va kerakli rasmlarni yuklash
+  $("#around-body").addEventListener("toggle", (e) => {
+    const det = e.target;
+    if (!det.matches || !det.matches("details.poi")) return;
+    const ui = uiFor(drawerId);
+    if (!ui.open) return;
+    const g = det.dataset.group;
+    const was = ui.open.has(g);
+    if (det.open && !was) { ui.open.add(g); renderAroundTab(); }
+    else if (!det.open && was) { ui.open.delete(g); }
+  }, true);
+
+  // Surat yuklanmasa — sun'iy yo'ldosh tasviriga almashtirish
+  $("#around-body").addEventListener("error", (e) => {
+    const img = e.target;
+    if (img.tagName !== "IMG") return;
+    if (img.dataset.sat && img.src !== img.dataset.sat) {
+      img.src = img.dataset.sat;
+      const btn = img.closest(".poi-thumb");
+      if (btn && !btn.classList.contains("sat")) { btn.classList.add("sat"); btn.insertAdjacentHTML("beforeend", '<span class="sat-tag">yoʻldosh</span>'); }
+    } else {
+      img.closest(".poi-thumb").classList.add("noimg");
+      img.remove();
+    }
+  }, true);
 
   function loadNearby(p, r) {
     const d = details.get(p.id) || {};

@@ -325,10 +325,42 @@ code, .mono { font-family: var(--f-mono); font-size: 12.5px; }
 .poi-name { font-weight: 600; font-size: 14px; flex: 1; }
 .poi-count { font: 600 13px var(--f-mono); color: var(--accent); }
 .poi-near { font-size: 12px; color: var(--muted); font-family: var(--f-mono); }
-.poi ul { list-style: none; margin: 0; padding: 0 6px 8px; }
-.poi-item { width: 100%; display: flex; justify-content: space-between; gap: 8px; padding: 5px 6px; border: 0; background: none; border-radius: 6px; cursor: pointer; font-size: 13px; text-align: left; }
-.poi-item:hover { background: var(--surface); }
-.poi-item span:last-child { font-family: var(--f-mono); font-size: 12px; flex: none; }
+.poi ul { list-style: none; margin: 0; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 6px; }
+.poi-card {
+  display: grid; grid-template-columns: 96px 1fr; gap: 10px; padding: 8px; border-radius: 8px;
+  background: var(--surface); border: 1px solid transparent; min-width: 0;
+}
+.poi-card.active { border-color: var(--accent); }
+.poi-thumb {
+  position: relative; width: 96px; height: 72px; padding: 0; border: 0; border-radius: 6px; overflow: hidden;
+  background: var(--surface-2); cursor: pointer; display: block;
+}
+.poi-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.poi-thumb.sat::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px;
+  border-radius: 50%; background: #e0412b; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .3);
+}
+.poi-thumb.noimg { background: repeating-linear-gradient(45deg, var(--surface-2) 0 6px, var(--line) 6px 7px); }
+.sat-tag {
+  position: absolute; left: 4px; bottom: 4px; padding: 0 5px; border-radius: 4px; font-size: 10px; line-height: 16px;
+  background: rgba(8, 14, 28, .65); color: #fff; letter-spacing: .02em;
+}
+.poi-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.poi-title { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; font-size: 14px; color: var(--ink); }
+.poi-title:hover b { color: var(--accent); }
+.poi-kind { font-size: 12px; color: var(--teal); font-weight: 500; }
+.poi-desc { margin: 2px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--ink); }
+.poi-where { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.poi-facts { margin: 2px 0 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.poi-links { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 3px; font-size: 12px; }
+.poi-links a { text-decoration: none; }
+.poi-links a:hover { text-decoration: underline; }
+.poi-phone { font-family: var(--f-mono); color: var(--ink); }
+.poi-more { margin: 0 12px 10px; font-size: 13px; }
+@media (max-width: 420px) {
+  .poi-card { grid-template-columns: 80px 1fr; }
+  .poi-thumb { width: 80px; height: 64px; }
+}
 
 /* ---------- Toast ---------- */
 .toast {
