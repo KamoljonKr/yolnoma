@@ -194,7 +194,7 @@
     }
     out.push("</div>");
     if (empty.length) out.push('<p class="muted small">Topilmadi: ' + esc(empty.join(", ")) + ".</p>");
-    out.push('<p class="muted small">Manba: OpenStreetMap' + (nearby.source === "photon" ? " (Photon orqali, qisqartirilgan roʻyxat)" : " (Overpass)") +
+    out.push('<p class="muted small">Manba: OpenStreetMap' + (nearby.source === "nominatim" ? " (Nominatim orqali, asosiy toifalar boʻyicha qisqartirilgan roʻyxat)" : " (Overpass)") +
       '. Bu jamoatchilik xaritasi: ayrim obyektlar xaritaga belgilanmagan boʻlishi mumkin.</p>');
     return out.join("");
   }

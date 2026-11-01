@@ -230,15 +230,22 @@
     { id: "police", label: "Militsiya / IIB", sub: "", match: (t) => t.amenity === "police" },
   ];
 
+  /**
+   * Overpass so'rovi. "around" filtri tegli regex bilan birga juda sekin ishlaydi (server vaqt
+   * tugashi / 504), shuning uchun to'rtburchak hudud (bbox) ishlatiladi — u fazoviy indeks orqali
+   * tez bajariladi. Radiusdan tashqaridagi obyektlar keyin groupPOIs() da olib tashlanadi.
+   */
   function overpassQuery(lat, lon, radius) {
-    const a = "(around:" + radius + "," + lat.toFixed(6) + "," + lon.toFixed(6) + ")";
-    return "[out:json][timeout:12];(" +
-      "nw" + a + "[amenity~\"^(restaurant|cafe|fast_food|food_court|fuel|hospital|clinic|doctors|pharmacy|atm|bank|bureau_de_change|place_of_worship|marketplace|parking|toilets|police|bus_station|car_wash)$\"];" +
-      "nw" + a + "[tourism~\"^(hotel|guest_house|hostel|motel|apartment|attraction|museum|viewpoint|gallery|artwork)$\"];" +
-      "nw" + a + "[historic][historic!=memorial];" +
-      "nw" + a + "[shop~\"^(supermarket|convenience|mall|bakery|general|car_repair|tyres|car_parts)$\"];" +
-      "nw" + a + "[leisure~\"^(park|garden|water_park)$\"];" +
-      "nw" + a + "[railway~\"^(station|halt)$\"];" +
+    const dLat = radius / 111320;
+    const dLon = radius / (111320 * Math.cos(lat * Math.PI / 180));
+    const bbox = [lat - dLat, lon - dLon, lat + dLat, lon + dLon].map((v) => v.toFixed(6)).join(",");
+    return "[out:json][timeout:25][bbox:" + bbox + "];(" +
+      "nw[amenity~\"^(restaurant|cafe|fast_food|food_court|fuel|hospital|clinic|doctors|pharmacy|atm|bank|bureau_de_change|place_of_worship|marketplace|parking|toilets|police|bus_station|car_wash)$\"];" +
+      "nw[tourism~\"^(hotel|guest_house|hostel|motel|apartment|attraction|museum|viewpoint|gallery|artwork)$\"];" +
+      "nw[historic][historic!=memorial];" +
+      "nw[shop~\"^(supermarket|convenience|mall|bakery|general|car_repair|tyres|car_parts)$\"];" +
+      "nw[leisure~\"^(park|garden|water_park)$\"];" +
+      "nw[railway~\"^(station|halt)$\"];" +
       ");out tags center 600;";
   }
 
@@ -260,7 +267,7 @@
         running++;
         clearTimeout(hedge);
         hedge = setTimeout(launch, 3000); // 3 soniyada javob bo'lmasa, keyingi server ham parallel
-        fetchJSON(url + "?data=" + encodeURIComponent(q), { signal }, 15000).then((d) => {
+        fetchJSON(url + "?data=" + encodeURIComponent(q), { signal }, 28000).then((d) => {
           if (!d || !Array.isArray(d.elements)) throw new Error("notoʻgʻri javob");
           if (!d.elements.length && d.remark && /error|timed out|out of memory/i.test(d.remark)) throw new Error(d.remark);
           finish(true, { elements: d.elements, source: "overpass" });
@@ -275,53 +282,40 @@
     });
   }
 
-  /* 2-manba: Photon (komoot) — OpenStreetMap asosidagi qidiruv tizimi, toifa bo'yicha yaqin joylar. */
-  const PHOTON_TAGS = {
-    food: ["amenity:restaurant", "amenity:cafe", "amenity:fast_food"],
-    hotel: ["tourism:hotel", "tourism:guest_house", "tourism:hostel", "tourism:motel"],
-    fuel: ["amenity:fuel"],
-    sight: ["tourism:attraction", "tourism:museum", "tourism:viewpoint", "historic"],
-    health: ["amenity:hospital", "amenity:clinic", "amenity:doctors"],
-    pharmacy: ["amenity:pharmacy"],
-    money: ["amenity:atm", "amenity:bank"],
-    shop: ["shop:supermarket", "shop:convenience", "shop:mall", "amenity:marketplace"],
-    worship: ["amenity:place_of_worship"],
-    car: ["shop:car_repair", "shop:tyres", "amenity:car_wash"],
-    parking: ["amenity:parking"],
-    transport: ["amenity:bus_station", "railway:station"],
-    park: ["leisure:park", "leisure:garden"],
-    toilet: ["amenity:toilets"],
-    police: ["amenity:police"],
-  };
+  /* 2-manba: Nominatim — toifa bo'yicha qidiruv hudud (viewbox) ichida. Qoida bo'yicha soniyasiga 1 ta so'rov,
+     shuning uchun faqat eng muhim toifalar so'raladi. */
+  const NOMINATIM_PHRASES = ["restaurant", "cafe", "hotel", "fuel", "pharmacy", "hospital", "atm",
+    "supermarket", "mosque", "museum", "attraction", "marketplace"];
 
-  async function photonNearby(lat, lon, radius, signal, errors) {
-    const km = Math.max(0.2, radius / 1000);
-    const groups = Object.entries(PHOTON_TAGS);
+  async function nominatimNearby(lat, lon, radius, signal, errors) {
+    const dLat = radius / 111320;
+    const dLon = radius / (111320 * Math.cos(lat * Math.PI / 180));
+    const viewbox = [lon - dLon, lat + dLat, lon + dLon, lat - dLat].map((v) => v.toFixed(6)).join(",");
     const elements = [];
     let ok = 0;
-    await Promise.all(groups.map(async ([gid, tags]) => {
-      const url = CFG.photon + "/reverse?lat=" + lat + "&lon=" + lon + "&radius=" + km + "&limit=40" +
-        tags.map((t) => "&osm_tag=" + encodeURIComponent(t)).join("");
+    for (const phrase of NOMINATIM_PHRASES) {
+      if (signal.aborted) break;
+      const url = CFG.nominatim + "/search?format=jsonv2&limit=40&bounded=1&accept-language=uz,ru,en" +
+        "&viewbox=" + viewbox + "&q=" + encodeURIComponent(phrase);
       try {
-        const d = await fetchJSON(url, { signal }, 15000);
+        const d = await nominatimQueue(() => fetchJSON(url, { signal }, 12000));
         ok++;
-        for (const f of d.features || []) {
-          const p = f.properties || {};
-          const [flon, flat] = f.geometry.coordinates;
-          elements.push({ type: p.osm_type || "N", id: p.osm_id || (gid + elements.length), lat: flat, lon: flon,
-            tags: { [p.osm_key]: p.osm_value, name: p.name || "" } });
+        for (const r of d || []) {
+          elements.push({ type: r.osm_type || "node", id: r.osm_id || r.place_id, lat: Number(r.lat), lon: Number(r.lon),
+            tags: { [r.category]: r.type, name: r.name || "" } });
         }
       } catch (e) {
-        errors.push("photon (" + gid + "): " + e.message);
+        errors.push("nominatim (" + phrase + "): " + e.message);
+        if (!ok && errors.filter((x) => x.startsWith("nominatim")).length >= 3) break; // umuman ishlamayapti
       }
-    }));
-    if (!ok) throw new Error("Photon ishlamadi");
-    return { elements, source: "photon" };
+    }
+    if (!ok) throw new Error("Nominatim ishlamadi");
+    return { elements, source: "nominatim" };
   }
 
   /**
-   * Atrofdagi obyektlar. Avval Overpass ishga tushadi; 6 soniyada javob bo'lmasa, Photon ham
-   * parallel ishga tushadi. Qaysi biri birinchi muvaffaqiyatli javob bersa, o'sha ko'rsatiladi.
+   * Atrofdagi obyektlar. Avval Overpass ishga tushadi; 10 soniyada javob bo'lmasa yoki xato bersa,
+   * Nominatim ham ishga tushadi. Qaysi biri birinchi muvaffaqiyatli javob bersa, o'sha ko'rsatiladi.
    */
   async function nearby(lat, lon, radius) {
     const key = lat.toFixed(5) + "," + lon.toFixed(5) + "," + radius;
@@ -329,16 +323,16 @@
     const stop = new AbortController();
     const errors = [];
     const over = overpassNearby(lat, lon, radius, stop.signal, errors);
-    const pho = new Promise((resolve, reject) => {
+    const nom = new Promise((resolve, reject) => {
       let started = false;
-      const start = () => { if (started || stop.signal.aborted) return; started = true; photonNearby(lat, lon, radius, stop.signal, errors).then(resolve, reject); };
-      const t = setTimeout(start, 6000);
+      const start = () => { if (started || stop.signal.aborted) return; started = true; nominatimNearby(lat, lon, radius, stop.signal, errors).then(resolve, reject); };
+      const t = setTimeout(start, 10000);
       over.catch(() => { clearTimeout(t); start(); }); // Overpass butunlay ishlamasa — darhol
       stop.signal.addEventListener("abort", () => { clearTimeout(t); if (!started) reject(new Error("kerak boʻlmadi")); }, { once: true });
     });
     let res;
     try {
-      res = await Promise.any([over, pho]);
+      res = await Promise.any([over, nom]);
     } catch (_) {
       throw new Error("Xarita maʼlumotlari serverlariga ulanib boʻlmadi. (" + errors.join("; ") + ")");
     } finally {
