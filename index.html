@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Yoʻlnoma</title>
+  <meta name="description" content="Oʻzbekiston boʻylab safar uchun eng qisqa marshrutni hisoblovchi platforma: manzillar tartibi, tepadan koʻrinish va atrofdagi joylar tahlili.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Unbounded:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M16 2 L19.5 12.5 L30 16 L19.5 19.5 L16 30 L12.5 19.5 L2 16 L12.5 12.5 Z" fill="currentColor"/>
+        <circle cx="16" cy="16" r="3.2" fill="var(--surface)"/>
+      </svg>
+      <div>
+        <div class="brand-name">Yoʻlnoma</div>
+        <div class="brand-sub">Oʻzbekiston boʻylab eng qulay marshrut</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button class="btn ghost sm" id="btn-share" type="button" title="Safar havolasini nusxalash">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+        <span>Ulashish</span>
+      </button>
+      <button class="btn ghost sm" id="btn-clear" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
+        <span>Tozalash</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel" id="panel">
+      <div class="sample-note" id="sample-note" hidden>
+        <strong>Namuna sayohat.</strong> Toshkentdan beshta shaharga safar misoli koʻrsatilgan.
+        <button class="link-btn" id="btn-sample-clear" type="button">Oʻz safarimni boshlash</button>
+      </div>
+
+      <!-- 1. Boshlang'ich nuqta -->
+      <section class="block" aria-labelledby="h-start">
+        <div class="block-head">
+          <span class="step">A</span>
+          <h2 id="h-start">Boshlangʻich nuqta</h2>
+        </div>
+        <div class="search-field" data-role="start">
+          <input id="start-input" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="Shahar, manzil, koordinata yoki Google/Yandex havola">
+          <ul class="suggest" role="listbox" hidden></ul>
+        </div>
+        <div class="row-actions">
+          <button class="btn ghost sm" id="btn-geo" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7.5"/></svg>
+            Mening joylashuvim
+          </button>
+          <button class="btn ghost sm" id="btn-pick-start" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.3-7-11.5A7 7 0 0 1 19 9.5C19 14.7 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
+            Xaritadan tanlash
+          </button>
+        </div>
+        <div id="start-card"></div>
+      </section>
+
+      <!-- 2. Manzillar -->
+      <section class="block" aria-labelledby="h-stops">
+        <div class="block-head">
+          <span class="step">B</span>
+          <h2 id="h-stops">Boriladigan manzillar</h2>
+          <span class="count" id="stop-count">0</span>
+        </div>
+        <div class="search-field" data-role="stop">
+          <input id="stop-input" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="Masalan: Registon, Samarqand">
+          <ul class="suggest" role="listbox" hidden></ul>
+        </div>
+        <div class="row-actions">
+          <button class="btn ghost sm" id="btn-pick-stop" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.3-7-11.5A7 7 0 0 1 19 9.5C19 14.7 12 21 12 21z"/><path d="M12 7v5M9.5 9.5h5"/></svg>
+            Xaritadan qoʻshish
+          </button>
+          <button class="btn ghost sm" id="btn-bulk-toggle" type="button" aria-expanded="false" aria-controls="bulk-box">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h9"/></svg>
+            Roʻyxat bilan qoʻshish
+          </button>
+        </div>
+        <div class="bulk" id="bulk-box" hidden>
+          <label for="bulk-input">Har bir qatorga bitta manzil, koordinata yoki xarita havolasi:</label>
+          <textarea id="bulk-input" rows="5" spellcheck="false" placeholder="Registon, Samarqand&#10;39.7747, 64.4286&#10;https://www.google.com/maps/@41.3783,60.3639,17z&#10;Chorvoq suv ombori"></textarea>
+          <div class="row-actions">
+            <button class="btn sm" id="btn-bulk" type="button">Hammasini qoʻshish</button>
+            <span class="hint" id="bulk-status"></span>
+          </div>
+        </div>
+        <ol class="stop-list" id="stop-list"></ol>
+        <p class="empty" id="stops-empty">Hali manzil qoʻshilmagan. Yuqoridagi maydonga joy nomini yozing yoki xaritadan belgilang.</p>
+      </section>
+
+      <!-- 3. Sozlamalar -->
+      <section class="block" aria-labelledby="h-opts">
+        <div class="block-head">
+          <span class="step">C</span>
+          <h2 id="h-opts">Safar sozlamalari</h2>
+        </div>
+        <fieldset class="seg" aria-label="Nimani optimallashtirish">
+          <input type="radio" name="metric" id="metric-distance" value="distance" checked>
+          <label for="metric-distance">Eng qisqa masofa</label>
+          <input type="radio" name="metric" id="metric-duration" value="duration">
+          <label for="metric-duration">Eng tez vaqt</label>
+        </fieldset>
+        <label class="check">
+          <input type="checkbox" id="roundtrip">
+          <span>Oxirida boshlangʻich nuqtaga qaytish</span>
+        </label>
+        <div class="grid-2">
+          <label class="field">
+            <span>Joʻnash vaqti</span>
+            <input type="time" id="depart" value="08:00">
+          </label>
+          <label class="field">
+            <span>Har manzilda turish, daq</span>
+            <input type="number" id="stay" min="0" max="1440" step="15" value="60">
+          </label>
+          <label class="field">
+            <span>Sarf, l/100 km</span>
+            <input type="number" id="fuel-rate" min="1" max="40" step="0.5" value="8">
+          </label>
+          <label class="field">
+            <span>Yoqilgʻi narxi, soʻm/l</span>
+            <input type="number" id="fuel-price" min="0" step="100" value="10500">
+          </label>
+        </div>
+      </section>
+
+      <button class="btn primary wide" id="btn-solve" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18c3 0 4-3 6-6s4-6 10-6"/><circle cx="4" cy="18" r="2"/><circle cx="20" cy="6" r="2"/></svg>
+        Eng qulay marshrutni hisoblash
+      </button>
+
+      <!-- 4. Natija -->
+      <section class="block result" id="result" hidden aria-live="polite">
+        <div class="block-head">
+          <span class="step done">✓</span>
+          <h2>Tavsiya etilgan marshrut</h2>
+        </div>
+        <div class="stale" id="stale-note" hidden>Manzillar oʻzgardi. Qayta hisoblang.</div>
+        <div class="stats" id="stats"></div>
+        <p class="savings" id="savings"></p>
+        <ol class="itinerary" id="itinerary"></ol>
+        <div class="export">
+          <a class="btn sm" id="link-google" target="_blank" rel="noopener">Google Maps’da ochish</a>
+          <a class="btn sm" id="link-yandex" target="_blank" rel="noopener">Yandex Kartada ochish</a>
+          <button class="btn ghost sm" id="btn-copy" type="button">Rejani nusxalash</button>
+        </div>
+        <div class="google-parts" id="google-parts" hidden></div>
+        <p class="source" id="source-note"></p>
+      </section>
+    </aside>
+
+    <section class="map-wrap">
+      <div id="map" aria-label="Xarita"></div>
+      <div class="pick-banner" id="pick-banner" hidden>
+        <span id="pick-text">Xaritada nuqtani bosing</span>
+        <button class="btn sm" id="btn-pick-cancel" type="button">Bekor qilish</button>
+      </div>
+      <div class="map-busy" id="map-busy" hidden><span class="spinner"></span><span id="busy-text">Hisoblanmoqda…</span></div>
+    </section>
+  </main>
+
+  <!-- Joy haqida panel -->
+  <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+  <aside class="drawer" id="drawer" hidden aria-labelledby="d-title" role="dialog">
+    <header class="drawer-head">
+      <div class="drawer-title-wrap">
+        <div class="eyebrow" id="d-eyebrow"></div>
+        <h3 id="d-title"></h3>
+        <div class="d-address" id="d-address"></div>
+        <div class="d-coords"><code id="d-coords"></code><button class="link-btn" id="btn-copy-coords" type="button">nusxalash</button></div>
+      </div>
+      <button class="icon-btn" id="btn-drawer-close" type="button" aria-label="Yopish">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <nav class="tabs" role="tablist">
+      <button role="tab" class="tab" data-tab="view" aria-selected="true" id="tab-view">Tepadan koʻrinish</button>
+      <button role="tab" class="tab" data-tab="about" aria-selected="false" id="tab-about">Joy haqida</button>
+      <button role="tab" class="tab" data-tab="around" aria-selected="false" id="tab-around">Atrofda nimalar bor</button>
+    </nav>
+    <div class="drawer-body">
+      <section class="tabpane" data-pane="view">
+        <fieldset class="seg small" aria-label="Xarita manbasi">
+          <input type="radio" name="viewsrc" id="vs-sat" value="sat" checked><label for="vs-sat">Sunʼiy yoʻldosh</label>
+          <input type="radio" name="viewsrc" id="vs-google" value="google"><label for="vs-google">Google</label>
+          <input type="radio" name="viewsrc" id="vs-yandex" value="yandex"><label for="vs-yandex">Yandex</label>
+        </fieldset>
+        <div class="viewer">
+          <div id="mini-map"></div>
+          <iframe id="view-frame" title="Tepadan koʻrinish" loading="lazy" referrerpolicy="no-referrer-when-downgrade" hidden></iframe>
+        </div>
+        <div class="ext-links" id="ext-links"></div>
+      </section>
+      <section class="tabpane" data-pane="about" hidden>
+        <div id="about-body"></div>
+      </section>
+      <section class="tabpane" data-pane="around" hidden>
+        <div class="around-ctrl">
+          <label for="radius">Radius</label>
+          <select id="radius">
+            <option value="500">500 m</option>
+            <option value="1000" selected>1 km</option>
+            <option value="3000">3 km</option>
+            <option value="5000">5 km</option>
+          </select>
+        </div>
+        <div id="around-body"></div>
+      </section>
+    </div>
+  </aside>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="config.js"></script>
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="js/geo.js"></script>
+  <script src="js/tsp.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/place.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
