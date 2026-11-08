@@ -190,16 +190,17 @@
   /** Belgilangan tartibdagi marshrut chizig'i va har bir bo'lak (leg) ma'lumoti. */
   async function route(points, opts) {
     const overview = (opts && opts.overview) || "full"; // "simplified" — chegara tekshiruvi uchun yengilroq
+    const wantSteps = !!(opts && opts.steps);          // burilish koʻrsatmalari (navigatsiya uchun)
     for (const base of CFG.osrm) {
       try {
         const url = base + "/route/v1/driving/" + coordStr(points) +
-          "?overview=" + overview + "&geometries=geojson&steps=false";
-        const data = await fetchJSON(url, null, 30000);
+          "?overview=" + overview + "&geometries=geojson&steps=" + (wantSteps ? "true" : "false");
+        const data = await fetchJSON(url, null, (opts && opts.timeout) || 30000);
         if (data.code !== "Ok" || !data.routes || !data.routes[0]) throw new Error(data.message || data.code);
         const r = data.routes[0];
         return {
           geometry: r.geometry.coordinates.map((c) => [c[1], c[0]]),
-          legs: r.legs.map((l) => ({ distance: l.distance, duration: l.duration })),
+          legs: r.legs.map((l) => (wantSteps ? { distance: l.distance, duration: l.duration, steps: l.steps || [] } : { distance: l.distance, duration: l.duration })),
           distance: r.distance,
           duration: r.duration,
           source: "osrm",

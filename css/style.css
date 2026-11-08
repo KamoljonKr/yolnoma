@@ -513,3 +513,65 @@ body.readonly .edit-only, body.readonly #savings, body.readonly #stops-empty { d
 .lv-gps { font-size: 12px; color: var(--muted); }
 @media (min-width: 901px) { .live { left: auto; right: 16px; bottom: 16px; width: 400px; } }
 @media (max-width: 900px) { body.live-on { padding-bottom: 46vh; } }
+
+/* ---------- Navigatsiya rejimi (Yandex uslubida) ---------- */
+body.live-on { overflow: hidden; }
+body.live-on .topbar, body.live-on .panel { display: none !important; }
+body.live-on .map-wrap { position: fixed !important; inset: 0; height: 100dvh !important; min-height: 0 !important; z-index: 20; }
+body.live-on .leaflet-control-zoom, body.live-on .leaflet-control-scale { display: none; }
+body.live-on .leaflet-top.leaflet-right { top: calc(env(safe-area-inset-top, 0px) + 104px); }
+body.live-on .route-line, body.live-on .route-casing { opacity: .3 !important; }
+body.live-on .toast { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 112px); z-index: 1600; }
+@media (max-width: 900px) { body.live-on { padding-bottom: 0; } }
+
+.nav-top {
+  position: fixed; z-index: 1260; left: 8px; right: 8px; top: calc(8px + env(safe-area-inset-top, 0px));
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 16px;
+  background: #14203a; color: #fff; box-shadow: 0 6px 24px rgba(0, 0, 0, .35); flex-wrap: wrap;
+}
+.nav-top[hidden], .nav-side[hidden] { display: none; }
+.nav-icon { flex: none; width: 56px; height: 56px; color: #fff; }
+.nav-icon svg { width: 100%; height: 100%; }
+.nav-info { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.2; }
+.nav-info b { font: 700 28px var(--f-display); letter-spacing: -.01em; }
+.nav-info span { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.nav-info em { font-style: normal; font-size: 14px; color: #9fb2d6; overflow-wrap: anywhere; }
+.nav-then { flex: 1 1 100%; font-size: 13.5px; color: #c9d6ee; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .15); }
+.nav-then[hidden] { display: none; }
+.nav-side {
+  position: fixed; z-index: 1255; left: 10px; top: calc(env(safe-area-inset-top, 0px) + 112px);
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+}
+.nav-speed {
+  width: 62px; height: 62px; border-radius: 50%; background: var(--surface); color: var(--ink);
+  border: 3px solid var(--accent); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: var(--shadow);
+}
+.nav-speed b { font: 700 21px/1 var(--f-display); }
+.nav-speed span { font-size: 9.5px; color: var(--muted); margin-top: 2px; }
+.nav-btn {
+  width: 48px; height: 48px; border-radius: 50%; border: 0; background: var(--surface); color: var(--ink); box-shadow: var(--shadow);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.nav-btn[hidden] { display: none; }
+.nav-btn svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.nav-btn .vo-off { display: block; } .nav-btn .vo-on { display: none; }
+.nav-btn.on { background: var(--accent); color: var(--accent-ink); }
+.nav-btn.on .vo-off { display: none; } .nav-btn.on .vo-on { display: block; }
+.nav-me-wrap { background: none; border: 0; }
+.nav-me { width: 46px; height: 46px; transition: transform .6s linear; }
+.nav-me svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .35)); }
+.nav-me.nohead svg path { fill: #2f6fed; }
+
+/* Pastki panel: ixcham koʻrinish (ETA) */
+.live-head { padding: 12px 10px 10px 14px; }
+.lv-headtext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lv-headtext > b { font: 600 12px var(--f-body); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.lv-bar { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; min-height: 28px; }
+.lv-bar .lv-eta { font: 700 26px var(--f-display); }
+.lv-bar small { font-size: 12px; color: var(--muted); margin-left: -6px; }
+.lv-bar span { font-size: 15px; font-weight: 600; color: var(--ink); }
+.lv-bar .lv-clock { font-size: 22px !important; }
+.live.min .lv-now, .live.min .lv-stats, .live.min .lv-next, .live.min .lv-gps { display: none; }
+.live.min .live-body { padding-top: 8px; }
+.live:not(.min) .lv-now, .live:not(.min) .lv-stats { display: flex; }
+.live:not(.min) .lv-stats { display: grid; }

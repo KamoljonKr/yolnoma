@@ -1191,10 +1191,10 @@
   const lv = {
     on: false, st: null, base: [], P: null, ctx: null, bounds: null,
     fix: null, rem: null, proj: null, watchId: null, wake: null, tick: null,
-    follow: true, min: false, gpsMsg: "", prev: null,
+    follow: true, min: true, gpsMsg: "", prev: null,
   };
   const liveLayer = L.layerGroup().addTo(map);
-  let meAcc = null, meDot = null;
+  let meAcc = null, meMarker = null, guideLine = null, guideCasing = null;
 
   const pad2 = (n) => String(n).padStart(2, "0");
   const localISO = (ms) => { const d = new Date(ms); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); };
@@ -1251,7 +1251,11 @@
     if (st.phase === "drive") {
       const target = Live.targetOf(st, state.start, ctx.stops, ctx.roundTrip);
       const planned = ctx.legs[st.idx] ? ctx.legs[st.idx].distance : 0;
-      if (lv.fix && target) {
+      if (lv.fix && target && nav.guide && nav.legIdx === st.idx && nav.onRoute) {
+        const meters = Math.max(0, nav.guide.total - nav.along);
+        lv.rem = { meters, frac: planned > 0 ? Math.min(3, meters / planned) : 1, offRoute: false, offM: nav.off, straightM: 0 };
+        frac = lv.rem.frac;
+      } else if (lv.fix && target) {
         lv.rem = Live.remaining(ctx.bounds ? result.geometry : null, ctx.bounds, st.idx, lv.fix, target, planned);
         frac = lv.rem.frac;
       } else if (st.idx > 0 || st.arrivals.length) fromName = st.idx > 0 && ctx.stops[st.idx - 1] ? ctx.stops[st.idx - 1].name : fromName;
@@ -1275,7 +1279,7 @@
     $("#lv-title").textContent = st.finished ? "Safar yakunlandi" : "Safar davom etmoqda";
     $(".live").classList.toggle("min", lv.min);
     $("#lv-min").setAttribute("aria-expanded", String(!lv.min));
-    let nowHtml = "", statHtml = "", actHtml = "";
+    let nowHtml = "", statHtml = "", actHtml = "", barHtml = "";
     const proj = lv.proj;
     const target = Live.targetOf(st, state.start, ctx.stops, ctx.roundTrip);
 
@@ -1292,6 +1296,9 @@
       statHtml += '<div class="lv-stat"><span>Rulda</span><b>~' + Geo.fmtDuration(legS * fracUsed) + "</b></div>";
       let arriveMs = null;
       if (proj) arriveMs = target.isReturn ? Live.toMs(proj.summary.endTime, P) : (proj.stops[0] ? Live.toMs(proj.stops[0].arrive, P) : null);
+      const em = arriveMs ? fmtAt(arriveMs).match(/^(\d\d:\d\d)(?: \((.*)\))?$/) : null;
+      barHtml = (em ? '<b class="lv-eta">' + em[1] + "</b>" + (em[2] ? "<small>" + em[2] + "</small>" : "") : "") +
+        "<span>" + Geo.fmtDuration(legS * fracUsed) + "</span><span>" + Geo.fmtKm(meters) + "</span>";
       if (arriveMs) {
         statHtml += '<div class="lv-stat wide"><span>Yetib borish</span><b>' + fmtAt(arriveMs) + "</b></div>";
         const base = lv.base[st.idx];
@@ -1305,6 +1312,8 @@
         (ctx.stops[st.idx] && ctx.stops[st.idx].note ? '<em class="note">' + liveEsc(ctx.stops[st.idx].note) + "</em>" : "");
       if (sr) {
         const ws = Live.toMs(sr.workStart, P), we = Live.toMs(sr.workEnd, P);
+        barHtml = now < ws ? '<span>Ish boshlanishigacha</span><b class="lv-clock">' + clockSec((ws - now) / 1000) + "</b>"
+          : now < we ? '<span>Ish tugashiga</span><b class="lv-clock">' + clockSec((we - now) / 1000) + "</b>" : '<b class="lv-late">Ish vaqti tugadi</b>';
         if (now < ws) {
           statHtml += '<div class="lv-stat wide"><span>Ish boshlanishigacha</span><b class="lv-clock">' + clockSec((ws - now) / 1000) + "</b></div>";
           statHtml += '<div class="lv-stat wide"><span>Ish vaqti</span><b>' + fmtAt(ws) + " – " + hm(we) + "</b></div>";
@@ -1320,7 +1329,9 @@
       actHtml = '<button class="btn" data-lv="finish" type="button">' + (isLast ? "Ishni tugatdim — safarni yakunlash" : "Ishni tugatdim — keyingisiga") + "</button>";
     }
     if (lv.prev) actHtml += '<button class="btn ghost" data-lv="undo" type="button">↶ Ortga</button>';
-    actHtml += '<button class="btn ghost" data-lv="follow" type="button">' + (lv.follow ? "Kuzatish: yoniq" : "Joylashuvimga qaytish") + "</button>";
+    if (st.finished) barHtml = "";
+    const bar = $("#lv-bar");
+    if (bar.innerHTML !== barHtml) bar.innerHTML = barHtml;
     if (now$.innerHTML !== nowHtml) now$.innerHTML = nowHtml;
     if (stats.innerHTML !== statHtml) stats.innerHTML = statHtml;
     if (acts.innerHTML !== actHtml) acts.innerHTML = actHtml;
@@ -1378,44 +1389,252 @@
 
   function liveAfterChange() {
     lv.rem = null;
+    if (nav.legIdx !== lv.st.idx) navReset();
+    nav.lastSetZoom = null;
     liveRecompute();
     liveSave();
     renderLive();
-    if (lv.fix && lv.follow && !lv.st.finished) liveCenter();
+    renderNav();
+    if (lv.fix && lv.follow && !lv.st.finished) navFollow(false);
+    if (lv.on && !lv.st.finished && lv.st.phase === "drive" && !nav.guide) navOnFix();
   }
 
-  function liveCenter() {
-    if (!lv.fix) return;
-    const z = Math.max(map.getZoom(), 12);
-    map.setView([lv.fix.lat, lv.fix.lon], z, { animate: true });
-  }
+  function liveCenter() { navFollow(true); }
+
+  const ME_ICON = () => L.divIcon({
+    className: "nav-me-wrap", iconSize: [46, 46], iconAnchor: [23, 23],
+    html: '<div class="nav-me"><svg viewBox="0 0 46 46"><circle cx="23" cy="23" r="21" fill="rgba(47,111,237,.16)"/><path d="M23 6 L35 36 L23 29.5 L11 36 Z" fill="#2f6fed" stroke="#fff" stroke-width="3" stroke-linejoin="round"/></svg></div>',
+  });
 
   function liveDraw() {
     if (!lv.fix) return;
     const ll = [lv.fix.lat, lv.fix.lon];
-    if (!meDot) {
-      meAcc = L.circle(ll, { radius: lv.fix.acc || 20, color: "#2f6fed", weight: 1, fillColor: "#2f6fed", fillOpacity: 0.12, interactive: false }).addTo(liveLayer);
-      meDot = L.circleMarker(ll, { radius: 8, color: "#fff", weight: 3, fillColor: "#2f6fed", fillOpacity: 1, interactive: false }).addTo(liveLayer);
-    } else { meAcc.setLatLng(ll); meAcc.setRadius(lv.fix.acc || 20); meDot.setLatLng(ll); }
+    if (!meMarker) {
+      meAcc = L.circle(ll, { radius: lv.fix.acc || 20, color: "#2f6fed", weight: 1, fillColor: "#2f6fed", fillOpacity: 0.1, interactive: false }).addTo(liveLayer);
+      meMarker = L.marker(ll, { icon: ME_ICON(), interactive: false, zIndexOffset: 3000, keyboard: false }).addTo(liveLayer);
+    } else { meAcc.setLatLng(ll); meAcc.setRadius(lv.fix.acc || 20); meMarker.setLatLng(ll); }
+    const el = meMarker.getElement && meMarker.getElement();
+    const inner = el && el.querySelector(".nav-me");
+    if (inner) { inner.style.transform = "rotate(" + (nav.heading === null || nav.heading === undefined ? 0 : nav.heading) + "deg)"; inner.classList.toggle("nohead", nav.heading === null || nav.heading === undefined); }
   }
 
   function liveOnPosition(pos) {
     const c = pos.coords;
-    lv.fix = { lat: c.latitude, lon: c.longitude, acc: c.accuracy, speed: c.speed, t: pos.timestamp || Live.now() };
+    lv.fix = { lat: c.latitude, lon: c.longitude, acc: c.accuracy, speed: c.speed, heading: c.heading, t: pos.timestamp || Live.now() };
     lv.gpsMsg = "";
+    navOnFix();
     liveDraw();
-    if (lv.follow && !lv.centered) { lv.centered = true; liveCenter(); }
-    else if (lv.follow) map.panTo([lv.fix.lat, lv.fix.lon], { animate: true });
+    navDraw();
+    navFollow(false);
     const target = Live.targetOf(lv.st, state.start, lv.ctx.stops, lv.ctx.roundTrip);
     if (Live.onFix(lv.st, lv.fix, target)) { liveDoArrive(true); return; }
     liveRecompute();
     renderLive();
+    renderNav();
   }
 
   function liveOnError(err) {
     const msgs = { 1: "GPS ruxsati berilmadi. Telefon sozlamalarida joylashuvga ruxsat bering. Hozircha tugmalar bilan boshqaring.", 2: "Joylashuvni aniqlab boʻlmadi. Ochiq joyga chiqing.", 3: "GPS javob bermadi, qayta urinilmoqda…" };
     lv.gpsMsg = msgs[err && err.code] || "GPS xatosi.";
     renderLive();
+  }
+
+  /* ---- Navigatsiya (Yandex uslubida kuzatish): burilish banneri, tezlik, ovoz, qayta yoʻl solish ---- */
+
+  const VOICE_KEY = "yolnoma.voice";
+  const nav = {
+    guide: null, legIdx: -1, loading: false, failedAt: 0, hint: null, stepIdx: 0, along: 0, off: 0, onRoute: false,
+    offSince: 0, lastReroute: 0, lastFullScan: 0, spoken: {}, speed: 0, heading: null, prevFix: null,
+    drawnAt: 0, voiceOn: false, voice: null, lastSetZoom: null, zoomLocked: false, rerouting: false,
+  };
+
+  function navIconSvg(icon) {
+    const c = "currentColor";
+    if (!icon) icon = { kind: "arrow", angle: 0 };
+    if (icon.kind === "flag") return '<svg viewBox="0 0 48 48"><path d="M13 42V8M13 10h24l-6 8 6 8H13" fill="none" stroke="' + c + '" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    if (icon.kind === "round") {
+      return '<svg viewBox="0 0 48 48"><circle cx="24" cy="26" r="10" fill="none" stroke="' + c + '" stroke-width="5"/>' +
+        '<path d="M24 46v-10" stroke="' + c + '" stroke-width="5" stroke-linecap="round"/>' +
+        '<g transform="rotate(' + (icon.angle || 0) + ' 24 26)"><path d="M24 16V6" stroke="' + c + '" stroke-width="5" stroke-linecap="round"/><path d="M15 12L24 3l9 9z" fill="' + c + '"/></g></svg>';
+    }
+    if (Math.abs(icon.angle) >= 179) { // U-burilish
+      return '<svg viewBox="0 0 48 48"><path d="M16 44V20a8 8 0 0 1 16 0v14" fill="none" stroke="' + c + '" stroke-width="5" stroke-linecap="round"/><path d="M23 32l9 11 9-11z" fill="' + c + '"/></svg>';
+    }
+    return '<svg viewBox="0 0 48 48"><path d="M24 44V26" stroke="' + c + '" stroke-width="5" stroke-linecap="round"/>' +
+      '<g transform="rotate(' + (icon.angle || 0) + ' 24 26)"><path d="M24 26V14" stroke="' + c + '" stroke-width="5" stroke-linecap="round"/><path d="M13 17L24 4l11 13z" fill="' + c + '"/></g></svg>';
+  }
+
+  function navPickVoice() {
+    try {
+      const vs = (window.speechSynthesis && speechSynthesis.getVoices && speechSynthesis.getVoices()) || [];
+      // Oʻzbek ovozi kam uchraydi; turk ovozi lotin yozuvidagi oʻzbekcha matnni yaxshi oʻqiydi
+      nav.voice = vs.find((v) => /^uz/i.test(v.lang)) || vs.find((v) => /^tr/i.test(v.lang)) || null;
+    } catch (_) { nav.voice = null; }
+    const b = $("#nav-voice");
+    b.hidden = !nav.voice || !lv.on;
+  }
+  try { if (window.speechSynthesis) speechSynthesis.addEventListener && speechSynthesis.addEventListener("voiceschanged", navPickVoice); } catch (_) { /* noop */ }
+
+  function navSpeak(text) {
+    if (!nav.voiceOn || !nav.voice) return;
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      u.voice = nav.voice; u.lang = nav.voice.lang; u.rate = 1;
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+    } catch (_) { /* noop */ }
+  }
+
+  function navReset() {
+    nav.guide = null; nav.legIdx = -1; nav.hint = null; nav.stepIdx = 0; nav.onRoute = false; nav.offSince = 0; nav.spoken = {};
+    if (guideLine) { liveLayer.removeLayer(guideLine); guideLine = null; }
+    if (guideCasing) { liveLayer.removeLayer(guideCasing); guideCasing = null; }
+  }
+
+  /** Hozirgi yoʻl qismi uchun burilish koʻrsatmalarini yuklaydi (OSRM steps). */
+  async function navFetchGuide(reason) {
+    if (nav.loading || !lv.on || lv.st.finished || lv.st.phase !== "drive") return;
+    const st = lv.st, ctx = lv.ctx, idx = st.idx;
+    const target = Live.targetOf(st, state.start, ctx.stops, ctx.roundTrip);
+    if (!target) return;
+    const prevPt = idx === 0 ? state.start : ctx.stops[idx - 1];
+    const here = lv.fix ? { lat: lv.fix.lat, lon: lv.fix.lon } : null;
+    const from = here || prevPt;
+    const dTo = (p) => Geo.haversine(p, target);
+    // aylanma yoʻl (chegara) nuqtalari: faqat hali oʻtilmaganlari
+    const via = ((result.via && result.via[idx]) || []).filter((v) => !here || dTo(v) < dTo(here));
+    nav.loading = true;
+    renderNav();
+    try {
+      const r = await API.route([from].concat(via, [target]), { steps: true, timeout: 25000 });
+      if (!lv.on || lv.st.idx !== idx || lv.st.phase !== "drive") return;       // holat oʻzgarib ketgan
+      const g = r ? Nav.parseGuide(r) : null;
+      if (!g) throw new Error("no route");
+      if (r.geometry && Border.excursions(r.geometry).list.length) throw new Error("border");   // Oʻzbekistondan chiqib ketadigan yoʻl — olmaymiz
+      nav.guide = g; nav.legIdx = idx; nav.hint = null; nav.stepIdx = 0; nav.spoken = {}; nav.failedAt = 0; nav.offSince = 0;
+      nav.drawnAt = 0;
+      if (reason === "reroute") { toast("Yangi marshrut hisoblandi."); navSpeak("Marshrut qayta hisoblandi"); }
+    } catch (e) {
+      console.warn("Navigatsiya yoʻriqnomasi olinmadi:", e && e.message);
+      nav.failedAt = Live.now();
+    } finally {
+      nav.loading = false;
+      if (lv.on) { navOnFix(true); navDraw(); renderLive(); renderNav(); }
+    }
+  }
+
+  /** Yangi GPS nuqtasi: yoʻlga yopishtirish, keyingi burilish, qayta yoʻl solish, ovoz. */
+  function navOnFix(noGuideFetch) {
+    if (!lv.on || !lv.fix) return;
+    const fix = lv.fix, now = Live.now(), st = lv.st;
+    nav.speed = Nav.speedKmh(fix, nav.prevFix);
+    nav.heading = Nav.heading(fix, nav.prevFix, nav.heading);
+    nav.prevFix = fix;
+    if (st.finished || st.phase !== "drive") { nav.onRoute = false; return; }
+    if (nav.guide && nav.legIdx === st.idx) {
+      let sn = Nav.snap(nav.guide, fix, nav.hint, false);
+      if (sn.off > 120 && now - nav.lastFullScan > 4000) { nav.lastFullScan = now; sn = Nav.snap(nav.guide, fix, null, true); }
+      nav.hint = sn.idx; nav.along = sn.along; nav.off = sn.off;
+      nav.onRoute = sn.off <= Math.max(90, (fix.acc || 0) * 2);
+      nav.snap = sn;
+      if (nav.onRoute) {
+        nav.offSince = 0;
+        nav.stepIdx = Nav.nextStep(nav.guide, sn.along, nav.stepIdx);
+        navAnnounce();
+      } else {
+        if (!nav.offSince) nav.offSince = now;
+        else if (now - nav.offSince > 10000 && now - nav.lastReroute > 25000 && !nav.loading && !noGuideFetch) {
+          nav.lastReroute = now;
+          navFetchGuide("reroute");
+        }
+      }
+    } else if (!nav.loading && !noGuideFetch && now - nav.failedAt > 45000) {
+      navFetchGuide("first");
+    }
+  }
+
+  function navAnnounce() {
+    const g = nav.guide, step = g.steps[nav.stepIdx];
+    if (!step) return;
+    const dist = step.along - nav.along, key = nav.legIdx + ":" + nav.stepIdx;
+    const say = (lvl, txt) => { if (!nav.spoken[key + lvl]) { nav.spoken[key + lvl] = true; navSpeak(txt); } };
+    if (step.type === "arrive") { if (dist < 250) say("n", step.title); return; }
+    if (dist < 200) say("n", step.title + (step.name ? ", " + step.name : ""));
+    else if (dist < 700 && dist > 350) say("f", Nav.fmtDist(dist) + "dan keyin " + step.title.charAt(0).toLowerCase() + step.title.slice(1));
+  }
+
+  function renderNav() {
+    const top = $("#nav-top"), side = $("#nav-side");
+    const st = lv.st;
+    const show = lv.on && st && !st.finished && st.phase === "drive";
+    top.hidden = !show;
+    side.hidden = !lv.on;
+    if (!lv.on) return;
+    $("#nav-speed b").textContent = String(Math.round(nav.speed || 0));
+    $("#nav-recenter").hidden = lv.follow;
+    const vb = $("#nav-voice");
+    vb.setAttribute("aria-pressed", String(nav.voiceOn));
+    vb.classList.toggle("on", nav.voiceOn);
+    if (!show) return;
+    const target = Live.targetOf(st, state.start, lv.ctx.stops, lv.ctx.roundTrip);
+    let icon = { kind: "arrow", angle: 0 }, distTxt = "", title = "", street = "", then = "";
+    const g = nav.guide;
+    if (g && nav.legIdx === st.idx && nav.onRoute && g.steps[nav.stepIdx]) {
+      const step = g.steps[nav.stepIdx];
+      icon = step.icon; distTxt = Nav.fmtDist(Math.max(0, step.along - nav.along)); title = step.title; street = step.name;
+      if (step.type === "arrive" && target) street = target.isReturn ? target.name : target.n + "-manzil: " + target.name;
+      const nx = g.steps[nav.stepIdx + 1];
+      if (nx && step.type !== "arrive" && nx.along - step.along < 400) then = "Keyin: " + nx.title.charAt(0).toLowerCase() + nx.title.slice(1);
+    } else if (g && nav.legIdx === st.idx && !nav.onRoute) {
+      icon = { kind: "arrow", angle: 180 }; distTxt = nav.off ? Nav.fmtDist(nav.off) : ""; title = "Marshrutdan chiqdingiz"; street = nav.loading ? "Yangi yoʻl hisoblanmoqda…" : "Marshrutga qayting — yangi yoʻl hisoblanadi";
+    } else {
+      distTxt = lv.rem ? Nav.fmtDist(lv.rem.meters) : "";
+      title = nav.loading ? "Yoʻl koʻrsatmalari yuklanmoqda…" : "Marshrut chizigʻi boʻylab yuring";
+      street = target ? (target.isReturn ? target.name : target.n + "-manzil: " + target.name) : "";
+    }
+    $("#nav-icon").innerHTML = navIconSvg(icon);
+    $("#nav-dist").textContent = distTxt;
+    $("#nav-title").textContent = title;
+    $("#nav-street").textContent = street;
+    const th = $("#nav-then"); th.textContent = then; th.hidden = !then;
+  }
+
+  /** Xaritada qolgan yoʻlni qalin koʻk chiziq bilan koʻrsatadi (2 soniyada bir marta). */
+  function navDraw() {
+    const g = nav.guide, st = lv.st;
+    if (!lv.on || !g || nav.legIdx !== st.idx || !nav.snap || !nav.onRoute) return;
+    const now = Live.now();
+    if (now - nav.drawnAt < 2000) return;
+    nav.drawnAt = now;
+    const path = Nav.remainingPath(g, nav.snap, 700);
+    if (!guideLine) {
+      guideCasing = L.polyline(path, { color: "#fff", weight: 11, opacity: 0.95, interactive: false, lineCap: "round", lineJoin: "round" }).addTo(liveLayer);
+      guideLine = L.polyline(path, { color: "#2f6fed", weight: 7, opacity: 1, interactive: false, lineCap: "round", lineJoin: "round" }).addTo(liveLayer);
+    } else { guideCasing.setLatLngs(path); guideLine.setLatLngs(path); }
+    if (meMarker) meMarker.setZIndexOffset(3000);
+  }
+
+  /** Xaritani foydalanuvchiga kuzatdiradi: koʻrinadigan oraliqning markazida, tezlikka mos masshtabda. */
+  function navFollow(force) {
+    if (!lv.fix || (!lv.follow && !force)) return;
+    const size = map.getSize();
+    const topEl = $("#nav-top"), sheet = $("#live");
+    const topH = topEl && !topEl.hidden ? topEl.offsetHeight + 12 : 12;
+    const botH = sheet && !sheet.hidden ? sheet.offsetHeight + 12 : 12;
+    const desiredY = (topH + (size.y - botH)) / 2 + (size.y - topH - botH) * 0.12;
+    let z = map.getZoom();
+    const cur = map.getZoom();
+    if (nav.lastSetZoom !== null && cur !== nav.lastSetZoom) nav.zoomLocked = true;   // foydalanuvchi oʻzi masshtabni oʻzgartirgan
+    if (force) nav.zoomLocked = false;
+    const target = nav.zoomLocked ? cur : Nav.zoomFor(nav.speed);
+    // tez-tez "pichirlamasligi" uchun masshtab faqat 1 pogʻonaga oʻzgaradi
+    z = target > cur ? cur + 1 : target < cur ? cur - 1 : cur;
+    if (!lv.centered) z = Math.max(cur, 15);
+    const p = map.project([lv.fix.lat, lv.fix.lon], z);
+    p.y += size.y / 2 - desiredY;
+    const c = map.unproject(p, z);
+    map.setView(c, z, { animate: lv.centered, duration: 0.8 });
+    nav.lastSetZoom = z;
+    lv.centered = true;
   }
 
   async function liveWake() {
@@ -1429,10 +1648,15 @@
   document.addEventListener("visibilitychange", () => { if (lv.on && document.visibilityState === "visible" && !lv.wake) liveWake(); });
 
   function liveBegin(restored) {
-    lv.on = true; lv.centered = false; lv.fix = null; lv.gpsMsg = "";
+    lv.on = true; lv.centered = false; lv.fix = null; lv.gpsMsg = ""; lv.follow = true; lv.min = true;
+    nav.prevFix = null; nav.heading = null; nav.speed = 0; nav.failedAt = 0; nav.lastSetZoom = null; nav.zoomLocked = false;
+    navReset();
+    try { nav.voiceOn = localStorage.getItem(VOICE_KEY) === "1"; } catch (_) { nav.voiceOn = false; }
     lv.ctx = liveContext();
     $("#live").hidden = false;
     document.body.classList.add("live-on");
+    setTimeout(() => { map.invalidateSize(); }, 60);
+    navPickVoice();
     if (navigator.geolocation) {
       lv.watchId = navigator.geolocation.watchPosition(liveOnPosition, liveOnError, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
     } else lv.gpsMsg = "Brauzeringiz GPS'ni qoʻllamaydi. Tugmalar bilan boshqaring.";
@@ -1442,10 +1666,8 @@
     lv.tick = setInterval(() => { if (++n % 20 === 0) liveRecompute(); renderLive(); }, 1000);
     liveRecompute();
     renderLive();
-    if (!restored) {
-      const mw = document.querySelector(".map-wrap");
-      if (mw && window.matchMedia("(max-width: 900px)").matches && mw.scrollIntoView) mw.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    renderNav();
+    if (restored === false && !lv.fix) map.setView([state.start.lat, state.start.lon], Math.max(map.getZoom(), 12));
   }
 
   function startLive() {
@@ -1475,9 +1697,13 @@
     clearInterval(lv.tick); lv.tick = null;
     try { if (lv.wake && lv.wake.release) lv.wake.release(); } catch (_) { /* noop */ }
     lv.wake = null;
-    liveLayer.clearLayers(); meDot = null; meAcc = null;
+    liveLayer.clearLayers(); meMarker = null; meAcc = null; guideLine = null; guideCasing = null;
+    navReset();
+    try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (_) { /* noop */ }
     $("#live").hidden = true;
+    $("#nav-top").hidden = true; $("#nav-side").hidden = true;
     document.body.classList.remove("live-on");
+    setTimeout(() => { map.invalidateSize(); fitAll(); }, 60);
     liveForget();
     if (msg) toast(msg);
   }
@@ -1507,9 +1733,17 @@
     else if (a === "finish") liveDoFinish();
     else if (a === "close") stopLive();
     else if (a === "undo" && lv.prev) { lv.st = JSON.parse(lv.prev); lv.prev = null; liveAfterChange(); }
-    else if (a === "follow") { lv.follow = true; liveCenter(); renderLive(); }
+
   });
-  map.on("dragstart", () => { if (lv.on && lv.follow) { lv.follow = false; renderLive(); } });
+  map.on("dragstart", () => { if (lv.on && lv.follow) { lv.follow = false; renderNav(); } });
+  $("#nav-recenter").onclick = () => { lv.follow = true; renderNav(); navFollow(true); };
+  $("#nav-voice").onclick = () => {
+    nav.voiceOn = !nav.voiceOn;
+    try { localStorage.setItem(VOICE_KEY, nav.voiceOn ? "1" : "0"); } catch (_) { /* noop */ }
+    renderNav();
+    if (nav.voiceOn) navSpeak("Ovozli koʻrsatma yoqildi");
+    else try { speechSynthesis.cancel(); } catch (_) { /* noop */ }
+  };
 
   /* ---------------- Safar hisoboti ---------------- */
 
