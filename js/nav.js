@@ -179,7 +179,7 @@
     if (fix && Number.isFinite(fix.speed) && fix.speed >= 0) return fix.speed * 3.6;
     if (fix && prev && fix.t > prev.t) {
       const d = distM(fix.lat, fix.lon, prev.lat, prev.lon), dt = (fix.t - prev.t) / 1000;
-      if (dt > 0 && dt < 30) return d / dt * 3.6;
+      if (dt > 0 && dt < 30) return Math.min(d / dt * 3.6, 250);   // GPS sakrashi (teleport) tezlik sifatida koʻrsatilmasin
     }
     return 0;
   }

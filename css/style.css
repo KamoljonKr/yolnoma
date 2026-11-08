@@ -557,6 +557,16 @@ body.live-on .toast { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 11
 .nav-btn .vo-off { display: block; } .nav-btn .vo-on { display: none; }
 .nav-btn.on { background: var(--accent); color: var(--accent-ink); }
 .nav-btn.on .vo-off { display: none; } .nav-btn.on .vo-on { display: block; }
+.nav-exit {
+  display: inline-flex; align-items: center; gap: 6px; height: 44px; padding: 0 16px 0 12px; border-radius: 22px; border: 0; cursor: pointer;
+  background: #d93a2b; color: #fff; font: 700 15px var(--f-body); box-shadow: var(--shadow);
+}
+.nav-exit svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.nav-compass-rose, #nav-compass-rose { transform-origin: 12px 12px; }
+.nav-btn .cp-n { fill: #d93a2b; stroke: none; } .nav-btn .cp-s { fill: currentColor; stroke: none; opacity: .55; }
+.nav-btn.heading { background: var(--accent); color: var(--accent-ink); }
+.nav-btn.heading .cp-n { fill: #fff; }
+body.live-on .leaflet-control-rotate { display: none; }
 .nav-me-wrap { background: none; border: 0; }
 .nav-me { width: 46px; height: 46px; transition: transform .6s linear; }
 .nav-me svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .35)); }

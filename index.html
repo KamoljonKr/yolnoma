@@ -198,9 +198,13 @@
     <div class="nav-then" id="nav-then" hidden></div>
   </div>
   <div class="nav-side" id="nav-side" hidden>
+    <button class="nav-exit" id="nav-exit" type="button" aria-label="Navigatsiyadan chiqish"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg><span>Chiqish</span></button>
     <div class="nav-speed" id="nav-speed"><b>0</b><span>km/soat</span></div>
     <button class="nav-btn" id="nav-voice" type="button" hidden aria-pressed="false" aria-label="Ovozli koʻrsatma">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path class="vo-on" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/><path class="vo-off" d="M16 9l5 6M21 9l-5 6"/></svg>
+    </button>
+    <button class="nav-btn" id="nav-compass" type="button" aria-label="Xarita yoʻnalishi">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><g id="nav-compass-rose"><path class="cp-n" d="M12 3l3.2 8.5h-6.4z"/><path class="cp-s" d="M12 21l-3.2-8.5h6.4z"/></g></svg>
     </button>
     <button class="nav-btn" id="nav-recenter" type="button" aria-label="Joylashuvimga qaytish" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></svg>
@@ -348,6 +352,7 @@
 
   <script src="config.js"></script>
   <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="vendor/leaflet-rotate/leaflet-rotate.js"></script>
   <script src="js/geo.js"></script>
   <script src="js/tsp.js"></script>
   <script src="js/api.js"></script>

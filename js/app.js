@@ -126,7 +126,10 @@
 
   /* ---------------- Xarita ---------------- */
 
-  const map = L.map("map", { zoomControl: false, preferCanvas: false }).setView([41.2, 64.6], 6);
+  const map = L.map("map", {
+    zoomControl: false, preferCanvas: false,
+    rotate: true, bearing: 0, touchRotate: true, shiftKeyRotate: true, rotateControl: { position: "topleft", closeOnZeroBearing: true },   // ikki barmoq bilan aylantirish
+  }).setView([41.2, 64.6], 6);
   L.control.zoom({ position: "bottomright" }).addTo(map);
   L.control.scale({ imperial: false, position: "bottomleft" }).addTo(map);
 
@@ -1415,7 +1418,17 @@
     } else { meAcc.setLatLng(ll); meAcc.setRadius(lv.fix.acc || 20); meMarker.setLatLng(ll); }
     const el = meMarker.getElement && meMarker.getElement();
     const inner = el && el.querySelector(".nav-me");
-    if (inner) { inner.style.transform = "rotate(" + (nav.heading === null || nav.heading === undefined ? 0 : nav.heading) + "deg)"; inner.classList.toggle("nohead", nav.heading === null || nav.heading === undefined); }
+    if (inner) inner.classList.toggle("nohead", nav.heading === null || nav.heading === undefined);
+    meRotate();
+  }
+
+  /** Joylashuv strelkasi: harakat yoʻnalishi plyus xarita aylanishi (ekrandagi burchak). */
+  function meRotate() {
+    const el = meMarker && meMarker.getElement && meMarker.getElement();
+    const inner = el && el.querySelector(".nav-me");
+    if (!inner) return;
+    const h = nav.heading === null || nav.heading === undefined ? 0 : nav.heading;
+    inner.style.transform = "rotate(" + (h + map.getBearing()) + "deg)";
   }
 
   function liveOnPosition(pos) {
@@ -1446,6 +1459,7 @@
     guide: null, legIdx: -1, loading: false, failedAt: 0, hint: null, stepIdx: 0, along: 0, off: 0, onRoute: false,
     offSince: 0, lastReroute: 0, lastFullScan: 0, spoken: {}, speed: 0, heading: null, prevFix: null,
     drawnAt: 0, voiceOn: false, voice: null, lastSetZoom: null, zoomLocked: false, rerouting: false,
+    mode: "heading", progRot: false,   // xarita: "heading" — harakat tepada, "north" — shimol tepada, "free" — qoʻlda aylantirilgan
   };
 
   function navIconSvg(icon) {
@@ -1571,6 +1585,7 @@
     if (!lv.on) return;
     $("#nav-speed b").textContent = String(Math.round(nav.speed || 0));
     $("#nav-recenter").hidden = lv.follow;
+    renderCompass();
     const vb = $("#nav-voice");
     vb.setAttribute("aria-pressed", String(nav.voiceOn));
     vb.classList.toggle("on", nav.voiceOn);
@@ -1613,6 +1628,28 @@
     if (meMarker) meMarker.setZIndexOffset(3000);
   }
 
+  /** "Harakat tepada" rejimi: xarita yoʻnalishga qarab buriladi (past tezlikda GPS yoʻnalishi ishonchsiz — oʻzgarmaydi). */
+  function navApplyBearing(force) {
+    if (nav.mode !== "heading" || nav.heading === null || nav.heading === undefined) return;
+    if (!force && (nav.speed || 0) < 5) return;
+    const cur = map.getBearing();
+    const d = (((-nav.heading - cur) % 360) + 540) % 360 - 180;
+    if (!force && Math.abs(d) < 2) return;
+    navSetBearing(cur + (force ? d : d * 0.6));
+  }
+  function navSetBearing(b) {
+    nav.progRot = true;
+    try { map.setBearing(b, { animate: false }); } finally { nav.progRot = false; }
+  }
+  function renderCompass() {
+    const b = $("#nav-compass");
+    if (!b) return;
+    const rose = $("#nav-compass-rose");
+    if (rose) rose.style.transform = "rotate(" + map.getBearing() + "deg)";
+    b.classList.toggle("heading", nav.mode === "heading");
+    b.setAttribute("aria-label", nav.mode === "heading" ? "Shimol tepada" : (Math.abs(((map.getBearing() + 540) % 360) - 180) > 1 ? "Shimolga qaytarish" : "Harakat yoʻnalishi tepada"));
+  }
+
   /** Xaritani foydalanuvchiga kuzatdiradi: koʻrinadigan oraliqning markazida, tezlikka mos masshtabda. */
   function navFollow(force) {
     if (!lv.fix || (!lv.follow && !force)) return;
@@ -1629,8 +1666,11 @@
     // tez-tez "pichirlamasligi" uchun masshtab faqat 1 pogʻonaga oʻzgaradi
     z = target > cur ? cur + 1 : target < cur ? cur - 1 : cur;
     if (!lv.centered) z = Math.max(cur, 15);
+    navApplyBearing(force);
+    // Xarita aylangan boʻlsa, joylashuv "pastroqda" turishi uchun siljish ham aylantiriladi
+    const th = map.getBearing() * Math.PI / 180, sy = desiredY - size.y / 2;
     const p = map.project([lv.fix.lat, lv.fix.lon], z);
-    p.y += size.y / 2 - desiredY;
+    p.x -= sy * Math.sin(th); p.y -= sy * Math.cos(th);
     const c = map.unproject(p, z);
     map.setView(c, z, { animate: lv.centered, duration: 0.8 });
     nav.lastSetZoom = z;
@@ -1649,7 +1689,7 @@
 
   function liveBegin(restored) {
     lv.on = true; lv.centered = false; lv.fix = null; lv.gpsMsg = ""; lv.follow = true; lv.min = true;
-    nav.prevFix = null; nav.heading = null; nav.speed = 0; nav.failedAt = 0; nav.lastSetZoom = null; nav.zoomLocked = false;
+    nav.prevFix = null; nav.heading = null; nav.speed = 0; nav.failedAt = 0; nav.lastSetZoom = null; nav.zoomLocked = false; nav.mode = "heading";
     navReset();
     try { nav.voiceOn = localStorage.getItem(VOICE_KEY) === "1"; } catch (_) { nav.voiceOn = false; }
     lv.ctx = liveContext();
@@ -1703,6 +1743,7 @@
     $("#live").hidden = true;
     $("#nav-top").hidden = true; $("#nav-side").hidden = true;
     document.body.classList.remove("live-on");
+    navSetBearing(0);
     setTimeout(() => { map.invalidateSize(); fitAll(); }, 60);
     liveForget();
     if (msg) toast(msg);
@@ -1723,7 +1764,9 @@
   }
 
   $("#btn-live").onclick = startLive;
-  $("#lv-stop").onclick = () => { if (!lv.on) return; if (lv.st && lv.st.finished || window.confirm("Safarni toʻxtatamizmi? Joriy holat oʻchiriladi.")) stopLive(); };
+  const liveExit = () => { if (!lv.on) return; if (lv.st && lv.st.finished || window.confirm("Safarni toʻxtatamizmi? Joriy holat oʻchiriladi.")) stopLive(); };
+  $("#lv-stop").onclick = liveExit;
+  $("#nav-exit").onclick = liveExit;
   $("#lv-min").onclick = () => { lv.min = !lv.min; renderLive(); };
   $("#live").addEventListener("click", (e) => {
     const b = e.target.closest("[data-lv]");
@@ -1736,6 +1779,16 @@
 
   });
   map.on("dragstart", () => { if (lv.on && lv.follow) { lv.follow = false; renderNav(); } });
+  map.on("rotate", () => {
+    if (lv.on && !nav.progRot && nav.mode !== "free") nav.mode = "free";      // foydalanuvchi oʻzi aylantirdi
+    if (lv.on) { meRotate(); renderCompass(); }
+  });
+  $("#nav-compass").onclick = () => {
+    const rotated = Math.abs(((map.getBearing() + 540) % 360) - 180) > 1;
+    if (nav.mode === "heading" || rotated) { nav.mode = "north"; navSetBearing(0); navFollow(true); }
+    else { nav.mode = "heading"; lv.follow = true; navApplyBearing(true); renderNav(); navFollow(true); }
+    renderCompass(); meRotate();
+  };
   $("#nav-recenter").onclick = () => { lv.follow = true; renderNav(); navFollow(true); };
   $("#nav-voice").onclick = () => {
     nav.voiceOn = !nav.voiceOn;
