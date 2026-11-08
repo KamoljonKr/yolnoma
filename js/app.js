@@ -209,7 +209,7 @@
         '<input class="pos-input" type="number" inputmode="numeric" min="1" max="' + state.stops.length + '" step="1" value="' + (s.pin || "") + '" placeholder="' + (solved ? visit : i + 1) + '"' +
         ' title="Tashrif tartibidagi oʻrni. Raqam yozsangiz, manzil aynan shu oʻringa qoʻyiladi va marshrut qayta hisoblanadi. Boʻsh qoldirsangiz — avtomatik." aria-label="Tashrif tartibidagi oʻrni">' +
         '<button class="icon-btn" type="button" data-act="link" title="Havola qoʻshish / oʻzgartirish">' + LINK_ICON + "</button>" +
-        '<button class="icon-btn" type="button" data-act="note" title="Izoh yozish / oʻzgartirish"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></button>' +
+        '<button class="icon-btn" type="button" data-act="edit" title="Tahrirlash: manzilni almashtirish, izoh, havola" aria-label="Manzilni tahrirlash"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></button>' +
         '<button class="icon-btn" type="button" data-act="info" title="Joy haqida"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></button>' +
         '<button class="icon-btn" type="button" data-act="remove" title="Oʻchirish"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>' +
         "</div></li>";
@@ -273,15 +273,8 @@
       save();
       renderAll();
       if (result && !result.stale) renderResult();
-    } else if (btn && btn.dataset.act === "note") {
-      const s = state.stops.find((x) => x.id === id);
-      if (!s) return;
-      const v = window.prompt("Oʻzim uchun izoh (boʻsh qoldirsangiz, izoh oʻchadi):", s.note || "");
-      if (v === null) return;
-      s.note = v.trim().slice(0, 80);
-      save();
-      renderAll();
-      if (result && !result.stale) renderResult();
+    } else if (btn && btn.dataset.act === "edit") {
+      openEdit(id);
     } else {
       openDrawer(id);
     }
@@ -1091,6 +1084,83 @@
         .finally(() => { d.wikiLoading = false; if (drawerId === p.id) renderAboutTab(); });
     }
     loadNearby(p, radius());
+  }
+
+  /* ---------------- Manzilni tahrirlash ---------------- */
+
+  const ED = { id: null, pick: null };
+  const edEl = (k) => $("#ed-" + k);
+
+  function showEditPick() {
+    const has = !!ED.pick;
+    edEl("new").hidden = !has;
+    if (has) { edEl("new-name").textContent = ED.pick.p.name; edEl("new-address").textContent = ED.pick.p.address || Geo.fmtCoord(ED.pick.p.lat, ED.pick.p.lon); }
+  }
+
+  function openEdit(id) {
+    const s = stopById(id);
+    if (!s) return;
+    ED.id = id; ED.pick = null;
+    edEl("name").textContent = s.name;
+    edEl("address").textContent = s.address || "";
+    edEl("coords").textContent = Geo.fmtCoord(s.lat, s.lon);
+    edEl("input").value = "";
+    edEl("note").value = s.note || "";
+    edEl("link").value = s.link || "";
+    showEditPick();
+    $("#edit-backdrop").hidden = false;
+    $("#edit-modal").hidden = false;
+    edEl("input").focus();
+  }
+  function closeEdit() { $("#edit-backdrop").hidden = true; $("#edit-modal").hidden = true; ED.id = null; ED.pick = null; }
+
+  setupSearch($('.search-field[data-role="edit"]'), (p, needsName) => { ED.pick = { p, needsName }; showEditPick(); });
+  edEl("new-clear").onclick = () => { ED.pick = null; showEditPick(); edEl("input").focus(); };
+  $("#edit-close").onclick = closeEdit;
+  $("#ed-cancel").onclick = closeEdit;
+  $("#edit-backdrop").onclick = closeEdit;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#edit-modal").hidden && $("#edit-modal .suggest").hidden) closeEdit(); });
+  for (const k of ["note", "link"]) edEl(k).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveEdit(); } });
+  $("#ed-save").onclick = saveEdit;
+
+  function saveEdit() {
+    const s = ED.id && stopById(ED.id);
+    if (!s) { closeEdit(); return; }
+    if (edEl("input").value.trim() && !ED.pick) { toast("Qidiruv natijasidan yangi manzilni tanlang yoki maydonni tozalang.", "warn"); edEl("input").focus(); return; }
+    let link = "";
+    const rawLink = edEl("link").value.trim();
+    if (rawLink) {
+      link = cleanUrl(rawLink);
+      if (link === null || link === "") { toast("Havola yaroqsiz (http yoki https bilan boshlanadigan toʻliq manzil kerak).", "warn"); edEl("link").focus(); return; }
+    }
+    const np = ED.pick && ED.pick.p;
+    if (np) {
+      const dup = state.stops.find((x) => x !== s && Geo.haversine(x, np) < 30);
+      if (dup) { toast("“" + dup.name + "” allaqachon roʻyxatda bor.", "warn"); return; }
+    }
+    s.note = edEl("note").value.trim().slice(0, 80);
+    s.link = link;
+    const hadResult = !!result;
+    if (np) {
+      // Oʻrin (pin), turish vaqti, izoh va havola saqlanadi; joylashuv va nom yangilanadi
+      Object.assign(s, { name: np.name, address: np.address, lat: np.lat, lon: np.lon, category: np.category, type: np.type,
+        addresstype: np.addresstype, region: np.region, district: np.district, city: np.city });
+      if (ED.pick.needsName) s.name = Geo.fmtCoord(np.lat, np.lon);
+      details.delete(s.id);
+      const needsName = ED.pick.needsName;
+      closeEdit();
+      changed({ keepSample: true });
+      if (needsName) enrichName(s);
+      if (!Geo.inUzbekistan(s.lat, s.lon)) toast("Diqqat: “" + s.name + "” Oʻzbekiston hududidan tashqarida.", "warn");
+      map.setView([s.lat, s.lon], Math.max(map.getZoom(), 11));
+      if (hadResult && state.start) solve();
+      toast("Manzil yangilandi" + (hadResult ? ", marshrut qayta hisoblanmoqda…" : "."));
+    } else {
+      closeEdit();
+      save(); renderAll();
+      if (result && !result.stale) renderResult();
+      toast("Saqlandi.");
+    }
   }
 
   /* ---------------- Safar hisoboti ---------------- */

@@ -15,6 +15,7 @@ Boshlangʻich nuqtani va borish kerak boʻlgan manzillarni kiritasiz. Platforma 
 - **Natija**: jami masofa, yoʻl vaqti, yoqilgʻi sarfi va narxi (soʻmda), har manzilga yetib borish va joʻnash soati. Siz kiritgan tartibga nisbatan qancha km tejalgani ham koʻrsatiladi.
 - **Eksport**: butun marshrutni Google Maps yoki Yandex Kartada navigatsiya uchun ochish, rejani matn sifatida nusxalash, safar havolasini ulashish.
 - **Har manzilda necha soat boʻlish**: manzil kartasidagi “soat” maydoniga shu manzil uchun alohida vaqt yoziladi (masalan, 3 yoki 1.5). Boʻsh qoldirilsa, umumiy “Har manzilda turish” ishlatiladi. Bu marshrut tartibini oʻzgartirmaydi, faqat yetib borish/ketish soatlari va hisobotni oʻzgartiradi.
+- **Manzilni tahrirlash**: kartadagi qalam tugmasi oynani ochadi. Yangi manzil (nom, koordinata yoki Google/Yandex havola) tanlansa, manzil almashadi va marshrut qayta hisoblanadi. Izoh, havola, turish vaqti va qoʻlda belgilangan oʻrin saqlanadi. Faqat izoh yoki havola oʻzgarsa, marshrut qayta hisoblanmaydi.
 - **Hisobot** (natija ostidagi “Hisobot” tugmasi): joʻnash sanasi va vaqti, ish soatlari (masalan, 10:00–18:00), har manzilda turish vaqti va haydashni tugatish vaqtini kiritasiz; sayt kunma-kun bashorat tuzadi:
   - sana (`09.11.2026`), undan keyin `1-manzil`, `2-manzil` … bloklari: yoʻl masofasi, rulda necha daqiqa, yetib borish, ish va ketish vaqti;
   - ish kuni tugashiga ulgurmasak, manzilda tunab, ertasi kuni ish boshlanishida davom etiladi; yoʻlda kech qolsak, yoʻlda tunash koʻrsatiladi;
