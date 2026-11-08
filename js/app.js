@@ -1020,6 +1020,99 @@
     loadNearby(p, radius());
   }
 
+  /* ---------------- Safar hisoboti ---------------- */
+
+  const REPORT_KEY = "yolnoma.report.v1";
+  const RP = ["date", "depart", "start", "end", "stay", "limit"].reduce((o, k) => { o[k] = $("#rp-" + k); return o; }, {});
+  let reportText = "", reportRep = null;
+
+  function todayISO() { return tomorrowISO(-1); }
+  function tomorrowISO(shift) {
+    const d = new Date(); d.setDate(d.getDate() + (shift === undefined ? 1 : shift + 1));
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function reportParams() {
+    return Report.normalizeParams({
+      date: RP.date.value, depart: RP.depart.value, workStart: RP.start.value, workEnd: RP.end.value,
+      driveLimit: RP.limit.value, stayMin: RP.stay.value === "" ? NaN : Number(RP.stay.value),
+    });
+  }
+
+  function buildReport() {
+    const np = reportParams();
+    const box = $("#rp-msgs");
+    box.innerHTML = "";
+    const addMsg = (t, cls) => { const d = document.createElement("div"); d.className = "rp-msg " + cls; d.textContent = t; box.appendChild(d); };
+    np.errors.forEach((m) => addMsg(m, "err"));
+    np.warnings.forEach((m) => addMsg(m, "warn"));
+    reportRep = null; reportText = "";
+    const dis = !np.ok || !result || result.stale;
+    ["#rp-download", "#rp-copy", "#rp-print"].forEach((id) => { $(id).disabled = dis; });
+    if (!np.ok) { $("#rp-preview").textContent = ""; return; }
+    if (!result || result.stale) { $("#rp-preview").textContent = "Avval marshrutni hisoblang."; return; }
+    try {
+      const stops = result.order.map(stopById).filter(Boolean);
+      reportRep = Report.schedule({
+        start: state.start, stops, legs: result.legs, roundTrip: result.roundTrip,
+        geometry: result.geometry, cities: Border.HUBS, params: np.P,
+      });
+      const now = new Date();
+      reportText = Report.toText(reportRep, { title: "Safar hisoboti", generated: now.toLocaleString("uz-UZ") });
+      $("#rp-preview").textContent = reportText;
+    } catch (e) {
+      console.error(e);
+      $("#rp-preview").textContent = "";
+      addMsg("Hisobotni tuzib boʻlmadi: " + e.message, "err");
+      ["#rp-download", "#rp-copy", "#rp-print"].forEach((id) => { $(id).disabled = true; });
+    }
+  }
+
+  function saveReportPrefs() {
+    try { localStorage.setItem(REPORT_KEY, JSON.stringify({ start: RP.start.value, end: RP.end.value, limit: RP.limit.value })); } catch (_) { /* noop */ }
+  }
+
+  function openReport() {
+    if (!result || result.stale) { toast("Avval marshrutni hisoblang."); return; }
+    let prefs = {};
+    try { prefs = JSON.parse(localStorage.getItem(REPORT_KEY) || "{}") || {}; } catch (_) { /* noop */ }
+    if (!RP.date.value || RP.date.value < todayISO()) RP.date.value = tomorrowISO();
+    RP.depart.value = state.depart || "08:00";     // saytdagi "Joʻnash vaqti"
+    RP.stay.value = state.stay;                    // saytdagi "Har manzilda turish"
+    RP.start.value = /^\d{2}:\d{2}$/.test(prefs.start || "") ? prefs.start : "10:00";
+    RP.end.value = /^\d{2}:\d{2}$/.test(prefs.end || "") ? prefs.end : "18:00";
+    RP.limit.value = /^\d{2}:\d{2}$/.test(prefs.limit || "") ? prefs.limit : "";
+    $("#report-backdrop").hidden = false;
+    $("#report-modal").hidden = false;
+    buildReport();
+    RP.date.focus();
+  }
+  function closeReport() { $("#report-backdrop").hidden = true; $("#report-modal").hidden = true; $("#btn-report").focus(); }
+
+  Object.keys(RP).forEach((k) => RP[k].addEventListener("input", () => { saveReportPrefs(); buildReport(); }));
+  $("#btn-report").onclick = openReport;
+  $("#report-close").onclick = closeReport;
+  $("#report-backdrop").onclick = closeReport;
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#report-modal").hidden) closeReport(); });
+
+  function reportFileName(ext) { return "hisobot-" + (RP.date.value || "safar") + "." + ext; }
+  function downloadFile(name, text, mime) {
+    const url = URL.createObjectURL(new Blob(["\ufeff" + text], { type: mime }));
+    const a = document.createElement("a");
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+  $("#rp-download").onclick = () => { if (reportText) { downloadFile(reportFileName("txt"), reportText, "text/plain;charset=utf-8"); toast("Hisobot yuklab olindi."); } };
+  $("#rp-copy").onclick = () => { if (reportText) copyText(reportText, "Hisobot nusxalandi."); };
+  $("#rp-print").onclick = () => {
+    if (!reportRep) return;
+    const f = document.createElement("iframe");
+    f.style.cssText = "position:fixed;width:0;height:0;border:0;right:0;bottom:0";
+    document.body.appendChild(f);
+    f.srcdoc = Report.toHTML(reportRep, { title: "Safar hisoboti" });
+    f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (_) { toast("Chop etib boʻlmadi."); } setTimeout(() => f.remove(), 60000); };
+  };
+
   /* ---------------- Boshlash ---------------- */
 
   function boot() {

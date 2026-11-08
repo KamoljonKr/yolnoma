@@ -14,6 +14,10 @@ Boshlangʻich nuqtani va borish kerak boʻlgan manzillarni kiritasiz. Platforma 
   - **Marshrut Oʻzbekiston ichida qoladi.** OSRM davlat chegarasini bilmaydi va Tojikiston, Qirgʻiziston kabi qoʻshni yoʻllar qisqaroq boʻlsa, oʻsha yerdan chizadi. Shuning uchun marshrut chizigʻi Oʻzbekiston konturidan 20 km dan uzoqroq chiqsa, platforma Oʻzbekiston ichidagi yirik shaharlar orqali aylanma yoʻl tanlaydi (`js/border.js`). Aylanma yoʻl nuqtalari Google/Yandex havolasiga ham qoʻshiladi. Ichki yoʻl umuman yoʻq manzillar uchun (masalan, anklavlar) ogohlantirish chiqadi.
 - **Natija**: jami masofa, yoʻl vaqti, yoqilgʻi sarfi va narxi (soʻmda), har manzilga yetib borish va joʻnash soati. Siz kiritgan tartibga nisbatan qancha km tejalgani ham koʻrsatiladi.
 - **Eksport**: butun marshrutni Google Maps yoki Yandex Kartada navigatsiya uchun ochish, rejani matn sifatida nusxalash, safar havolasini ulashish.
+- **Hisobot** (natija ostidagi “Hisobot” tugmasi): joʻnash sanasi va vaqti, ish soatlari (masalan, 10:00–18:00), har manzilda turish vaqti va haydashni tugatish vaqtini kiritasiz; sayt kunma-kun bashorat tuzadi:
+  - sana (`09.11.2026`), undan keyin `1-manzil`, `2-manzil` … bloklari: yoʻl masofasi, rulda necha daqiqa, yetib borish, ish va ketish vaqti;
+  - ish kuni tugashiga ulgurmasak, manzilda tunab, ertasi kuni ish boshlanishida davom etiladi; yoʻlda kech qolsak, yoʻlda tunash koʻrsatiladi;
+  - `.txt` yuklab olish, nusxalash, chop etish/PDF. Hisob tirbandlik va tushlikni hisobga olmaydi (`js/report.js`).
 - **Joy haqida panel** (manzilni bosing):
   - *Tepadan koʻrinish*: sunʼiy yoʻldosh tasviri, Google va Yandex sunʼiy yoʻldosh oynalari. Google Earth 3D, Street View va Yandex panoramasiga havolalar bor.
   - *Joy haqida*: joy turi, hudud, dengiz sathidan balandlik, 3 kunlik ob-havo va Vikipediya maʼlumoti. Hudud xarakteri ham baholanadi (gavjum shahar, tuman markazi, kichik aholi punkti yoki chekka hudud). Sayohatchi uchun maslahatlar beriladi, masalan: “yoqilgʻi shoxobchasi yoʻq”, “bankomat yoʻq”.
@@ -62,6 +66,7 @@ js/api.js         tashqi xizmatlar bilan ishlash
 js/border.js      marshrut chegaradan chiqmasligini tekshirish va aylanma yoʻl topish
 js/uz-border.js   Oʻzbekiston chegarasi (Natural Earth, ~1 km aniqlik)
 js/place.js       joy tavsifi va atrof tahlili
+js/report.js      kunma-kun safar hisoboti (jadval, matn, chop etish)
 js/app.js         interfeys mantigʻi
 vendor/leaflet/   xarita kutubxonasi (Leaflet 1.9.4)
 ```
