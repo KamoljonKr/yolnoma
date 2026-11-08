@@ -49,12 +49,13 @@
       category: p.category || "", type: p.type || "", addresstype: p.addresstype || "",
       region: p.region || "", district: p.district || "", city: p.city || "",
       note: String(p.note || "").trim().slice(0, 80), // foydalanuvchining oʻzi uchun izohi
+      pin: Number.isInteger(Number(p.pin)) && Number(p.pin) > 0 ? Number(p.pin) : 0, // qoʻlda belgilangan tashrif oʻrni (0 — avtomatik)
     };
   }
 
   function serialize() {
     const slim = (p) => p && ({ name: p.name, address: p.address, lat: +p.lat.toFixed(6), lon: +p.lon.toFixed(6),
-      category: p.category, type: p.type, region: p.region, note: p.note || "" });
+      category: p.category, type: p.type, region: p.region, note: p.note || "", pin: p.pin || 0 });
     return {
       start: slim(state.start), stops: state.stops.map(slim), metric: state.metric, roundTrip: state.roundTrip,
       depart: state.depart, stay: state.stay, fuelRate: state.fuelRate, fuelPrice: state.fuelPrice, sample: state.sample,
@@ -170,10 +171,12 @@
     $("#stops-empty").hidden = state.stops.length > 0;
     list.innerHTML = state.stops.map((s, i) => {
       const visit = solved ? result.order.indexOf(s.id) + 1 : 0;
-      return '<li class="place-card" data-id="' + s.id + '">' +
+      return '<li class="place-card' + (s.pin ? " pinned" : "") + '" data-id="' + s.id + '">' +
         '<span class="badge ' + (solved ? "" : "pending") + '" title="' + (solved ? "Tashrif tartibi" : "Kiritilgan tartib") + '">' + (solved ? visit : i + 1) + "</span>" +
         '<div class="pc-text">' + noteTag(s.note) + "<b>" + esc(s.name) + "</b><span>" + esc(s.address || Geo.fmtCoord(s.lat, s.lon)) + "</span></div>" +
         '<div class="pc-actions">' +
+        '<input class="pos-input" type="number" inputmode="numeric" min="1" max="' + state.stops.length + '" step="1" value="' + (s.pin || "") + '" placeholder="' + (solved ? visit : i + 1) + '"' +
+        ' title="Tashrif tartibidagi oʻrni. Raqam yozsangiz, manzil aynan shu oʻringa qoʻyiladi va marshrut qayta hisoblanadi. Boʻsh qoldirsangiz — avtomatik." aria-label="Tashrif tartibidagi oʻrni">' +
         '<button class="icon-btn" type="button" data-act="note" title="Izoh yozish / oʻzgartirish"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></button>' +
         '<button class="icon-btn" type="button" data-act="info" title="Joy haqida"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></button>' +
         '<button class="icon-btn" type="button" data-act="remove" title="Oʻchirish"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>' +
@@ -181,7 +184,28 @@
     }).join("");
   }
 
+  /* Tashrif oʻrnini qoʻlda belgilash: raqam yozilsa, manzil shu oʻringa qotiriladi va marshrut qayta hisoblanadi */
+  $("#stop-list").addEventListener("change", (e) => {
+    const inp = e.target.closest(".pos-input");
+    const li = inp && inp.closest("li[data-id]");
+    const s = li && stopById(li.dataset.id);
+    if (!s) return;
+    const raw = inp.value.trim(), n = state.stops.length;
+    if (raw === "") s.pin = 0;
+    else {
+      const k = Number(raw);
+      if (!Number.isInteger(k) || k < 1 || k > n) { toast("Oʻrin 1 dan " + n + " gacha boʻlishi kerak.", "warn"); inp.value = s.pin || ""; return; }
+      const other = state.stops.find((x) => x !== s && x.pin === k);
+      if (other) { toast(k + "-oʻrin allaqachon “" + other.name + "” uchun belgilangan. Avval uni boʻshating.", "warn"); inp.value = s.pin || ""; return; }
+      s.pin = k;
+    }
+    const hadResult = !!result;
+    changed({ keepSample: true });
+    if (hadResult && state.start) solve();
+  });
+
   $("#stop-list").addEventListener("click", (e) => {
+    if (e.target.closest(".pos-input")) return;
     const btn = e.target.closest("button[data-act]");
     const li = e.target.closest("li[data-id]");
     if (!li) return;
@@ -464,6 +488,7 @@
     if (!state.stops.length) { toast("Kamida bitta manzil qoʻshing.", "warn"); $("#stop-input").focus(); return; }
     if (state.stops.length > 60) { toast("Bir safarda koʻpi bilan 60 ta manzil hisoblanadi.", "warn"); return; }
     setPick(null);
+    const pins = activePins();
     busy(true, "Yoʻl masofalari olinmoqda…");
     try {
       const pts = [state.start].concat(state.stops);
@@ -477,7 +502,7 @@
         // Tartib va marshrut birga hisoblanadi: yoʻl boshqa davlat hududidan oʻtsa, ichki yoʻl tanlanadi (border.js)
         try {
           plan = await Border.plan({
-            pts, mx: mx0, metric: state.metric, roundTrip: state.roundTrip,
+            pts, mx: mx0, metric: state.metric, roundTrip: state.roundTrip, pins,
             route: API.route, matrix: API.matrix, tsp: TSP, progress: (t) => busy(true, t),
           });
         } catch (e) {
@@ -490,7 +515,7 @@
         border = { detoured: plan.detoured, unresolved: plan.unresolved.map((u) => ({ from: u.from.name, to: u.to.name })) };
       } else {
         const cost0 = state.metric === "duration" ? mx0.durations : mx0.distances;
-        sol = TSP.solve(cost0, { roundTrip: state.roundTrip });
+        sol = TSP.solve(cost0, { roundTrip: state.roundTrip, pins });
         seq = [0].concat(sol.order, state.roundTrip ? [0] : []);
         busy(true, "Marshrut chizilmoqda…");
         rt = await API.route(seq.map((k) => pts[k]));
@@ -508,6 +533,14 @@
       const inDur = TSP.pathCost(mx.durations, inputOrder, state.roundTrip);
       const optDistM = TSP.pathCost(mx.distances, sol.order, state.roundTrip);
       const optDurM = TSP.pathCost(mx.durations, sol.order, state.roundTrip);
+      // Belgilangan oʻrinlar marshrutni qanchaga uzaytirganini koʻrsatish uchun: erkin (belgilarsiz) eng yaxshi tartib
+      const pinned = Object.keys(pins).length;
+      let freeDist = optDistM, freeDur = optDurM;
+      if (pinned) {
+        const freeSol = TSP.solve(cost, { roundTrip: state.roundTrip });
+        freeDist = TSP.pathCost(mx.distances, freeSol.order, state.roundTrip);
+        freeDur = TSP.pathCost(mx.durations, freeSol.order, state.roundTrip);
+      }
 
       result = {
         order: sol.order.map((k) => pts[k].id),
@@ -515,7 +548,8 @@
         geometry: rt ? rt.geometry : routePts.map((p) => [p.lat, p.lon]),
         distance: legs.reduce((s, l) => s + l.distance, 0),
         duration: legs.reduce((s, l) => s + l.duration, 0),
-        compare: { inDist, inDur, optDist: optDistM, optDur: optDurM, inputCost, optCost: sol.cost },
+        compare: { inDist, inDur, optDist: optDistM, optDur: optDurM, freeDist, freeDur, inputCost, optCost: sol.cost },
+        pinned,
         exact: sol.exact,
         source: mx.source,
         routeSource: rt ? "osrm" : "straight",
@@ -567,6 +601,23 @@
 
   function stopById(id) { return state.stops.find((s) => s.id === id); }
 
+  /** Qoʻlda belgilangan oʻrinlar: {manzilIndeksi: oʻrin}. Yaroqsizlari (oʻrin qolmagan yoki takror) olib tashlanadi. */
+  function activePins() {
+    const n = state.stops.length, pins = {}, used = new Set(), dropped = [];
+    state.stops.forEach((s, i) => {
+      if (!s.pin) return;
+      if (s.pin > n || used.has(s.pin)) { dropped.push(s.name + " (" + s.pin + ")"); s.pin = 0; return; }
+      used.add(s.pin);
+      pins[i + 1] = s.pin;
+    });
+    if (dropped.length) {
+      save();
+      renderStops();
+      toast("Oʻrin mavjud emasligi uchun belgilash olib tashlandi: " + dropped.join(", "), "warn");
+    }
+    return pins;
+  }
+
   function renderResult() {
     if (!result) return;
     renderResultState();
@@ -586,11 +637,15 @@
     const savedDur = c.inDur - c.optDur;
     let sv;
     if (r.order.length < 2) sv = "Bitta manzil — tartibni tanlash shart emas.";
-    else if ((r.metric === "distance" ? savedDist : savedDur) > 1) {
+    else if (r.pinned) {
+      const extra = r.metric === "distance" ? c.optDist - c.freeDist : c.optDur - c.freeDur;
+      sv = "Qoʻlda belgilangan <b>" + r.pinned + " ta</b> oʻrin saqlandi, qolgan manzillar shu shartda eng qulay tartibda joylashtirildi.";
+      if (extra > 1) sv += " Belgilashsiz tartibga nisbatan <b>" + (r.metric === "distance" ? Geo.fmtKm(extra) : Geo.fmtDuration(extra)) + "</b> uzunroq.";
+    } else if ((r.metric === "distance" ? savedDist : savedDur) > 1) {
       sv = "Siz kiritgan tartibga nisbatan <b>" + Geo.fmtKm(Math.max(0, savedDist)) + "</b> qisqa" +
         (savedDur > 60 ? " va <b>" + Geo.fmtDuration(savedDur) + "</b> tezroq" : "") + ".";
     } else sv = "Siz kiritgan tartib allaqachon eng qulayi ekan.";
-    sv += r.exact ? " Barcha variantlar tekshirildi — bu eng optimal tartib." : " Koʻp manzil uchun yaqinlashtirilgan (evristik) yechim ishlatildi.";
+    sv += r.exact ? (r.pinned ? " Barcha variantlar tekshirildi." : " Barcha variantlar tekshirildi — bu eng optimal tartib.") : " Koʻp manzil uchun yaqinlashtirilgan (evristik) yechim ishlatildi.";
     $("#savings").innerHTML = sv;
 
     const rows = [];
@@ -603,7 +658,7 @@
       t += leg.duration;
       rows.push(legRow(leg));
       rows.push(itRow({ badge: String(i + 1), cls: "", name: s.name, note: s.note,
-        sub: "Yetib borish " + clock(state.depart, t) + (state.stay ? " · ketish " + clock(state.depart, t + state.stay * 60) : ""),
+        sub: "Yetib borish " + clock(state.depart, t) + (s.pin ? " · oʻrni belgilangan" : "") + (state.stay ? " · ketish " + clock(state.depart, t + state.stay * 60) : ""),
         id: s.id, region: s.region }));
       t += state.stay * 60;
     });

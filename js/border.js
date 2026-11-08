@@ -177,7 +177,8 @@
    *  roundTrip — oxirida boshlangʻich nuqtaga qaytish
    *  route     — async (points, {overview}) => {geometry, legs, distance, duration} | null
    *  matrix    — async (points) => {distances, durations, source}
-   *  tsp       — {solve(cost, {roundTrip})}
+   *  tsp       — {solve(cost, {roundTrip, pins})}
+   *  pins      — qoʻlda belgilangan oʻrinlar {manzilIndeksi: oʻrin} (ixtiyoriy)
    *  progress  — (matn) => void
    */
   async function plan(o) {
@@ -363,7 +364,7 @@
 
     let last = null, scanned = false;
     for (let it = 0; it < MAX_ITER; it++) {
-      const sol = tsp.solve(useDur ? adjT : adjD, { roundTrip });
+      const sol = tsp.solve(useDur ? adjT : adjD, { roundTrip, pins: o.pins });
       const seq = [0].concat(sol.order, roundTrip ? [0] : []);
       const { nodes, legOf } = expand(seq);
       progress(it === 0 ? "Marshrut chizilmoqda…" : "Marshrut chegara boʻyicha tekshirilmoqda…");

@@ -182,6 +182,16 @@ code, .mono { font-family: var(--f-mono); font-size: 12.5px; }
 .pc-text b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-text span { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-actions { display: flex; }
+/* Tashrif oʻrnini qoʻlda belgilash */
+.pos-input {
+  width: 46px; padding: 5px 4px; margin-right: 4px; text-align: center; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: 500 13px var(--f-mono);
+  -moz-appearance: textfield;
+}
+.pos-input::placeholder { color: var(--muted); opacity: .7; }
+.pos-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.place-card.pinned { border-color: var(--accent); }
+.place-card.pinned .pos-input { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 /* Oʻzim uchun izoh: kiritish maydoni va roʻyxat/marshrutdagi belgisi */
 .field.note-field input { font-family: var(--f-body); font-size: 14px; padding: 10px 12px; }
 .note-field small { font-size: 11.5px; opacity: .85; }
