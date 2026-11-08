@@ -181,11 +181,13 @@
       return info;
     }
 
-    const need = Math.min(P.stay, P.workEnd - P.workStart);
     let overrun = false;
     const stopRes = [];
     let prevName = start.name;
     stops.forEach((s, i) => {
+      // Manzilning oʻz turish vaqti (daqiqa) bor boʻlsa — oʻshani, boʻlmasa umumiyni olamiz
+      const stay = Number.isFinite(s.stay) && s.stay >= 0 ? s.stay : P.stay;
+      const need = Math.min(stay, P.workEnd - P.workStart);
       const leg = drive(prevName, s.name, legs[i], (i + 1) + "-manzil (" + s.name + ")");
       const arrive = t, day = dayOf(arrive), time = arrive - day * 1440;
       let workStart;
@@ -200,11 +202,11 @@
       } else if (workStart > arrive + EPS) {
         push({ type: "wait", start: arrive, end: workStart, place: s.name });
       }
-      const workEnd = workStart + P.stay;
-      if (P.stay > P.workEnd - P.workStart) overrun = true;
+      const workEnd = workStart + stay;
+      if (stay > P.workEnd - P.workStart) overrun = true;
       push({ type: "work", start: workStart, end: workEnd, stop: i + 1, place: s.name });
       t = workEnd;
-      stopRes.push({ n: i + 1, stop: s, leg, arrive, workStart, workEnd, postponed, waitMin: !postponed ? workStart - arrive : 0, night });
+      stopRes.push({ n: i + 1, stop: s, leg, stay, own: Number.isFinite(s.stay) && s.stay >= 0, arrive, workStart, workEnd, postponed, waitMin: !postponed ? workStart - arrive : 0, night });
       prevName = s.name;
     });
 
@@ -216,7 +218,7 @@
     } else {
       push({ type: "end", start: t, end: t });
     }
-    if (overrun) warnings.push("Manzildagi ish davomiyligi ish oynasidan uzun: ish tugash vaqtidan oshib ketadi.");
+    if (overrun) warnings.push("Baʼzi manzillarda ish davomiyligi ish oynasidan uzun: ish tugash vaqtidan oshib ketadi.");
 
     /* ----- Kunlar boʻyicha boʻlimlar ----- */
     const items = new Map();
@@ -267,10 +269,10 @@
     }
     out.push("  Yetib borish: " + hhmm(sr.arrive));
     if (sr.postponed) {
-      out.push("  Ish: bugun ulgurilmaydi (" + fmtDur(P.stay) + " kerak, ish kuni " + hhmm(P.workEnd) + " da tugaydi) → " + dmyOf(sr.workStart) + " " + hhmm(sr.workStart) + " – " + hhmm(sr.workEnd) + " (" + fmtDur(P.stay) + ")");
+      out.push("  Ish: bugun ulgurilmaydi (" + fmtDur(sr.stay) + " kerak, ish kuni " + hhmm(P.workEnd) + " da tugaydi) → " + dmyOf(sr.workStart) + " " + hhmm(sr.workStart) + " – " + hhmm(sr.workEnd) + " (" + fmtDur(sr.stay) + ")");
     } else {
       if (sr.waitMin > 1) out.push("  Kutish: " + hhmm(sr.arrive) + " – " + hhmm(sr.workStart) + " (" + Math.round(sr.waitMin) + " daq, ish boshlanishigacha)");
-      out.push("  Ish: " + hhmm(sr.workStart) + " – " + hhmm(sr.workEnd) + " (" + fmtDur(P.stay) + ")");
+      out.push("  Ish: " + hhmm(sr.workStart) + " – " + hhmm(sr.workEnd) + " (" + fmtDur(sr.stay) + ")");
       out.push("  Ketish: " + when(sr.workEnd));
     }
     return out;
@@ -284,7 +286,7 @@
       else if (it.kind === "work2") {
         const sr = it.sr;
         out.push(""); out.push(sr.n + "-manzil: " + sr.stop.name + " (davomi)");
-        out.push("  Ish: " + hhmm(sr.workStart) + " – " + hhmm(sr.workEnd) + " (" + fmtDur(P.stay) + ")");
+        out.push("  Ish: " + hhmm(sr.workStart) + " – " + hhmm(sr.workEnd) + " (" + fmtDur(sr.stay) + ")");
         out.push("  Ketish: " + hhmm(sr.workEnd));
       } else if (it.kind === "night") {
         const e = it.e, nextDmy = dateInfo(P.date, dayOf(e.end + EPS)).dmy;
@@ -305,7 +307,7 @@
     const P = rep.params, S = rep.summary, m = meta || {};
     const L = [];
     L.push((m.title || "Safar hisoboti") + " — Yoʻlnoma");
-    L.push("Joʻnash: " + dateInfo(P.date, 0).dmy + " " + hhmm(P.depart) + ". Ish: har kuni " + hhmm(P.workStart) + "–" + hhmm(P.workEnd) + ", har manzilda " + fmtDur(P.stay) + ". Kechqurun haydash " + hhmm(P.driveLimit) + " gacha.");
+    L.push("Joʻnash: " + dateInfo(P.date, 0).dmy + " " + hhmm(P.depart) + ". Ish: har kuni " + hhmm(P.workStart) + "–" + hhmm(P.workEnd) + ", har manzilda " + fmtDur(P.stay) + (rep.stops.some((r) => r.own) ? " (oʻz vaqti belgilangan manzillardan tashqari)" : "") + ". Kechqurun haydash " + hhmm(P.driveLimit) + " gacha.");
     for (const day of rep.days) {
       L.push(""); L.push("");
       L.push(day.dmy + " (" + day.weekday + ")");

@@ -58,6 +58,15 @@
     return url ? '<a class="' + cls + '" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer" title="' + esc(url) + '">' + LINK_ICON + esc(linkHost(url)) + "</a>" : "";
   }
 
+  /** Manzilning oʻz turish vaqti (daqiqa). Boʻsh/notoʻgʻri boʻlsa null. */
+  function cleanStay(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) && n >= 0 && n <= 1440 ? n : null;
+  }
+  const stayOf = (s) => (s && s.stay !== null && s.stay !== undefined ? s.stay : state.stay);
+  const hoursStr = (min) => String(Math.round(min / 60 * 100) / 100);
+
   function place(p) {
     return {
       id: p.id || newId(),
@@ -68,13 +77,14 @@
       region: p.region || "", district: p.district || "", city: p.city || "",
       note: String(p.note || "").trim().slice(0, 80), // foydalanuvchining oʻzi uchun izohi
       link: cleanUrl(p.link) || "", // manzilga biriktirilgan qoʻshimcha havola
+      stay: cleanStay(p.stay), // shu manzilda necha daqiqa turish (null — umumiy "Har manzilda turish" ishlatiladi)
       pin: Number.isInteger(Number(p.pin)) && Number(p.pin) > 0 ? Number(p.pin) : 0, // qoʻlda belgilangan tashrif oʻrni (0 — avtomatik)
     };
   }
 
   function serialize() {
     const slim = (p) => p && ({ name: p.name, address: p.address, lat: +p.lat.toFixed(6), lon: +p.lon.toFixed(6),
-      category: p.category, type: p.type, region: p.region, note: p.note || "", link: p.link || "", pin: p.pin || 0 });
+      category: p.category, type: p.type, region: p.region, note: p.note || "", link: p.link || "", stay: p.stay === undefined ? null : p.stay, pin: p.pin || 0 });
     return {
       start: slim(state.start), stops: state.stops.map(slim), metric: state.metric, roundTrip: state.roundTrip,
       depart: state.depart, stay: state.stay, fuelRate: state.fuelRate, fuelPrice: state.fuelPrice, sample: state.sample,
@@ -194,6 +204,8 @@
         '<span class="badge ' + (solved ? "" : "pending") + '" title="' + (solved ? "Tashrif tartibi" : "Kiritilgan tartib") + '">' + (solved ? visit : i + 1) + "</span>" +
         '<div class="pc-text">' + noteTag(s.note) + "<b>" + esc(s.name) + "</b><span>" + esc(s.address || Geo.fmtCoord(s.lat, s.lon)) + "</span>" + linkTag(s.link, "link-chip") + "</div>" +
         '<div class="pc-actions">' +
+        '<label class="stay-wrap" title="Shu manzilda necha soat boʻlasiz. Boʻsh qoldirsangiz — umumiy “Har manzilda turish” ishlatiladi (hozir ' + hoursStr(state.stay) + ' soat).">' +
+        '<input class="stay-input" type="number" inputmode="decimal" min="0" max="24" step="0.5" value="' + (s.stay === null ? "" : hoursStr(s.stay)) + '" placeholder="' + hoursStr(state.stay) + '" aria-label="Shu manzilda turish, soat"><small>soat</small></label>' +
         '<input class="pos-input" type="number" inputmode="numeric" min="1" max="' + state.stops.length + '" step="1" value="' + (s.pin || "") + '" placeholder="' + (solved ? visit : i + 1) + '"' +
         ' title="Tashrif tartibidagi oʻrni. Raqam yozsangiz, manzil aynan shu oʻringa qoʻyiladi va marshrut qayta hisoblanadi. Boʻsh qoldirsangiz — avtomatik." aria-label="Tashrif tartibidagi oʻrni">' +
         '<button class="icon-btn" type="button" data-act="link" title="Havola qoʻshish / oʻzgartirish">' + LINK_ICON + "</button>" +
@@ -205,7 +217,24 @@
   }
 
   /* Tashrif oʻrnini qoʻlda belgilash: raqam yozilsa, manzil shu oʻringa qotiriladi va marshrut qayta hisoblanadi */
+  /* Shu manzilda necha soat turish: marshrut tartibiga taʼsir qilmaydi, faqat vaqt jadvali oʻzgaradi */
   $("#stop-list").addEventListener("change", (e) => {
+    const si = e.target.closest(".stay-input");
+    if (si) {
+      const li = si.closest("li[data-id]"), s = li && stopById(li.dataset.id);
+      if (!s) return;
+      const raw = si.value.trim().replace(",", ".");
+      if (raw === "") s.stay = null;
+      else {
+        const h = Number(raw);
+        if (!Number.isFinite(h) || h < 0 || h > 24) { toast("Vaqt 0 dan 24 soatgacha boʻlishi kerak.", "warn"); si.value = s.stay === null ? "" : hoursStr(s.stay); return; }
+        s.stay = Math.round(h * 60);
+      }
+      si.value = s.stay === null ? "" : hoursStr(s.stay);
+      save();
+      if (result && !result.stale) renderResult();
+      return;
+    }
     const inp = e.target.closest(".pos-input");
     const li = inp && inp.closest("li[data-id]");
     const s = li && stopById(li.dataset.id);
@@ -225,7 +254,7 @@
   });
 
   $("#stop-list").addEventListener("click", (e) => {
-    if (e.target.closest(".pos-input") || e.target.closest("a")) return;
+    if (e.target.closest(".pos-input") || e.target.closest(".stay-wrap") || e.target.closest("a")) return;
     const btn = e.target.closest("button[data-act]");
     const li = e.target.closest("li[data-id]");
     if (!li) return;
@@ -510,6 +539,7 @@
         if (cast === Number && !Number.isFinite(v)) return;
         state[key] = v;
         save();
+        if (key === "stay") renderStops();   // kartalardagi "umumiy" soat koʻrsatkichi yangilansin
         if (result && !result.stale) renderResult();
       };
     }
@@ -664,13 +694,15 @@
     const r = result;
     const liters = r.distance / 1000 * state.fuelRate / 100;
     const money = liters * state.fuelPrice;
-    const stayTotal = r.order.length * state.stay * 60;
+    const stayMins = r.order.map((id) => stayOf(stopById(id)));
+    const stayTotal = stayMins.reduce((a, b) => a + b, 0) * 60;
+    const customStay = r.order.some((id) => { const s = stopById(id); return s && s.stay !== null; });
 
     $("#stats").innerHTML =
       stat("Jami masofa", Geo.fmtKm(r.distance)) +
       stat("Rulda", Geo.fmtDuration(r.duration)) +
       stat("Yoqilgʻi", (liters < 10 ? liters.toFixed(1) : Math.round(liters)) + " l", Geo.fmtSum(money)) +
-      stat("Turishlar bilan", Geo.fmtDuration(r.duration + stayTotal), r.order.length + " × " + state.stay + " daq");
+      stat("Turishlar bilan", Geo.fmtDuration(r.duration + stayTotal), customStay ? "manzillar boʻyicha: " + Geo.fmtDuration(stayTotal) : r.order.length + " × " + state.stay + " daq");
 
     const c = r.compare;
     const savedDist = c.inDist - c.optDist;
@@ -698,9 +730,9 @@
       t += leg.duration;
       rows.push(legRow(leg));
       rows.push(itRow({ badge: String(i + 1), cls: "", name: s.name, note: s.note, link: s.link,
-        sub: "Yetib borish " + clock(state.depart, t) + (s.pin ? " · oʻrni belgilangan" : "") + (state.stay ? " · ketish " + clock(state.depart, t + state.stay * 60) : ""),
+        sub: "Yetib borish " + clock(state.depart, t) + (s.pin ? " · oʻrni belgilangan" : "") + (s.stay !== null ? " · " + hoursStr(s.stay) + " soat" : "") + (stayOf(s) ? " · ketish " + clock(state.depart, t + stayOf(s) * 60) : ""),
         id: s.id, region: s.region }));
-      t += state.stay * 60;
+      t += stayOf(s) * 60;
     });
     if (r.roundTrip && r.legs[r.order.length]) {
       const leg = r.legs[r.order.length];

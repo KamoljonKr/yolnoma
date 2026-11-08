@@ -188,6 +188,17 @@ code, .mono { font-family: var(--f-mono); font-size: 12.5px; }
   border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: 500 13px var(--f-mono);
   -moz-appearance: textfield;
 }
+/* Shu manzilda turish (soat) */
+.stay-wrap { display: inline-flex; align-items: center; gap: 2px; margin-right: 6px; }
+.stay-wrap small { font-size: 11px; color: var(--muted); }
+.stay-input {
+  width: 44px; padding: 5px 3px; text-align: center; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: 500 13px var(--f-mono);
+  -moz-appearance: textfield;
+}
+.stay-input::placeholder { color: var(--muted); opacity: .7; }
+.stay-input:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px var(--accent-soft); }
+.stay-input:not(:placeholder-shown) { border-color: var(--teal); color: var(--teal); font-weight: 600; }
 .pos-input::placeholder { color: var(--muted); opacity: .7; }
 .pos-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .place-card.pinned { border-color: var(--accent); }
