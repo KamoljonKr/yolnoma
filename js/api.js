@@ -188,11 +188,12 @@
   }
 
   /** Belgilangan tartibdagi marshrut chizig'i va har bir bo'lak (leg) ma'lumoti. */
-  async function route(points) {
+  async function route(points, opts) {
+    const overview = (opts && opts.overview) || "full"; // "simplified" — chegara tekshiruvi uchun yengilroq
     for (const base of CFG.osrm) {
       try {
         const url = base + "/route/v1/driving/" + coordStr(points) +
-          "?overview=full&geometries=geojson&steps=false";
+          "?overview=" + overview + "&geometries=geojson&steps=false";
         const data = await fetchJSON(url, null, 30000);
         if (data.code !== "Ok" || !data.routes || !data.routes[0]) throw new Error(data.message || data.code);
         const r = data.routes[0];

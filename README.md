@@ -11,6 +11,7 @@ Boshlangʻich nuqtani va borish kerak boʻlgan manzillarni kiritasiz. Platforma 
   - Undan koʻp manzil boʻlsa, 2-opt va Or-opt usullari bilan yaqin yechim topiladi (60 tagacha).
   - Hisob haqiqiy yoʻl tarmogʻi boʻyicha olib boriladi (OSRM, OpenStreetMap). Xizmat ishlamasa, taxminiy hisobga oʻtadi.
   - Ikki rejim bor: eng qisqa masofa yoki eng tez vaqt. Oxirida boshlangʻich nuqtaga qaytishni ham yoqish mumkin.
+  - **Marshrut Oʻzbekiston ichida qoladi.** OSRM davlat chegarasini bilmaydi va Tojikiston, Qirgʻiziston kabi qoʻshni yoʻllar qisqaroq boʻlsa, oʻsha yerdan chizadi. Shuning uchun marshrut chizigʻi Oʻzbekiston konturidan 20 km dan uzoqroq chiqsa, platforma Oʻzbekiston ichidagi yirik shaharlar orqali aylanma yoʻl tanlaydi (`js/border.js`). Aylanma yoʻl nuqtalari Google/Yandex havolasiga ham qoʻshiladi. Ichki yoʻl umuman yoʻq manzillar uchun (masalan, anklavlar) ogohlantirish chiqadi.
 - **Natija**: jami masofa, yoʻl vaqti, yoqilgʻi sarfi va narxi (soʻmda), har manzilga yetib borish va joʻnash soati. Siz kiritgan tartibga nisbatan qancha km tejalgani ham koʻrsatiladi.
 - **Eksport**: butun marshrutni Google Maps yoki Yandex Kartada navigatsiya uchun ochish, rejani matn sifatida nusxalash, safar havolasini ulashish.
 - **Joy haqida panel** (manzilni bosing):
@@ -58,6 +59,8 @@ css/style.css     dizayn (yorugʻ va qorongʻi rejim, mobil)
 js/geo.js         masofa, koordinata va havolalarni oʻqish
 js/tsp.js         optimal tartib algoritmi
 js/api.js         tashqi xizmatlar bilan ishlash
+js/border.js      marshrut chegaradan chiqmasligini tekshirish va aylanma yoʻl topish
+js/uz-border.js   Oʻzbekiston chegarasi (Natural Earth, ~1 km aniqlik)
 js/place.js       joy tavsifi va atrof tahlili
 js/app.js         interfeys mantigʻi
 vendor/leaflet/   xarita kutubxonasi (Leaflet 1.9.4)

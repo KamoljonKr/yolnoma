@@ -443,23 +443,41 @@
     busy(true, "Yoʻl masofalari olinmoqda…");
     try {
       const pts = [state.start].concat(state.stops);
-      const mx = await API.matrix(pts);
-      const cost = state.metric === "duration" ? mx.durations : mx.distances;
+      const mx0 = await API.matrix(pts);
       busy(true, "Eng qulay tartib hisoblanmoqda…");
       await new Promise((r) => setTimeout(r, 20));
-      const sol = TSP.solve(cost, { roundTrip: state.roundTrip });
       const inputOrder = state.stops.map((_, i) => i + 1);
+
+      let mx = mx0, sol, rt, seq, legs, via = [], border = null, plan = null;
+      if (mx0.source === "osrm" && window.Border) {
+        // Tartib va marshrut birga hisoblanadi: yoʻl boshqa davlat hududidan oʻtsa, ichki yoʻl tanlanadi (border.js)
+        try {
+          plan = await Border.plan({
+            pts, mx: mx0, metric: state.metric, roundTrip: state.roundTrip,
+            route: API.route, matrix: API.matrix, tsp: TSP, progress: (t) => busy(true, t),
+          });
+        } catch (e) {
+          console.warn("Chegara tekshiruvi ishlamadi, oddiy hisobga oʻtildi:", e);
+        }
+      }
+      if (plan) {
+        sol = plan.sol; rt = plan.rt; seq = plan.seq; legs = plan.legs; via = plan.via;
+        mx = { distances: plan.adjD, durations: plan.adjT, source: mx0.source };
+        border = { detoured: plan.detoured, unresolved: plan.unresolved.map((u) => ({ from: u.from.name, to: u.to.name })) };
+      } else {
+        const cost0 = state.metric === "duration" ? mx0.durations : mx0.distances;
+        sol = TSP.solve(cost0, { roundTrip: state.roundTrip });
+        seq = [0].concat(sol.order, state.roundTrip ? [0] : []);
+        busy(true, "Marshrut chizilmoqda…");
+        rt = await API.route(seq.map((k) => pts[k]));
+        legs = rt ? rt.legs : null;
+      }
+      const cost = state.metric === "duration" ? mx.durations : mx.distances;
       const inputCost = TSP.pathCost(cost, inputOrder, state.roundTrip);
-      const ordered = sol.order.map((k) => pts[k]);
-
-      busy(true, "Marshrut chizilmoqda…");
-      const routePts = [state.start].concat(ordered, state.roundTrip ? [state.start] : []);
-      const rt = await API.route(routePts);
-
-      const seq = [0].concat(sol.order, state.roundTrip ? [0] : []);
-      let legs;
-      if (rt && rt.legs.length === seq.length - 1) legs = rt.legs;
-      else legs = seq.slice(1).map((to, i) => ({ distance: mx.distances[seq[i]][to], duration: mx.durations[seq[i]][to] }));
+      const routePts = seq.map((k) => pts[k]);
+      if (!(legs && legs.length === seq.length - 1)) {
+        legs = seq.slice(1).map((to, i) => ({ distance: mx.distances[seq[i]][to], duration: mx.durations[seq[i]][to] }));
+      }
 
       // Kiritilgan tartib bilan solishtirish (ikkala o'lchovda)
       const inDist = TSP.pathCost(mx.distances, inputOrder, state.roundTrip);
@@ -477,6 +495,8 @@
         exact: sol.exact,
         source: mx.source,
         routeSource: rt ? "osrm" : "straight",
+        via,
+        border,
         roundTrip: state.roundTrip,
         metric: state.metric,
         stale: false,
@@ -572,7 +592,14 @@
     $("#itinerary").innerHTML = rows.join("");
 
     // Eksport havolalari
-    const seq = [state.start].concat(r.order.map(stopById).filter(Boolean), r.roundTrip ? [state.start] : []);
+    // Google/Yandex marshrutni oʻzi qayta hisoblaydi va chegaradan oʻtkazib yuborishi mumkin,
+    // shuning uchun aylanma yoʻl oraliq nuqtalari ham havolaga qoʻshiladi.
+    const stops = [state.start].concat(r.order.map(stopById).filter(Boolean), r.roundTrip ? [state.start] : []);
+    const seq = [stops[0]];
+    for (let i = 1; i < stops.length; i++) {
+      for (const v of (r.via && r.via[i - 1]) || []) seq.push(v);
+      seq.push(stops[i]);
+    }
     const ll = (p) => p.lat.toFixed(6) + "," + p.lon.toFixed(6);
     const gLink = (pts) => "https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=" + ll(pts[0]) +
       "&destination=" + ll(pts[pts.length - 1]) +
@@ -594,6 +621,19 @@
     $("#source-note").innerHTML = r.source === "osrm"
       ? "Masofa va vaqt OpenStreetMap yoʻl tarmogʻi (OSRM) boʻyicha avtomobil uchun hisoblandi. Tirbandlik hisobga olinmaydi."
       : "Yoʻl xizmatiga ulanib boʻlmadi — masofa toʻgʻri chiziq × 1,3 va 60 km/soat tezlik boʻyicha <b>taxminiy</b> hisoblandi.";
+
+    // Chegara tekshiruvi natijasi (border.js)
+    if (r.border) {
+      if (r.border.unresolved.length) {
+        $("#source-note").innerHTML += " <b>Diqqat:</b> " +
+          r.border.unresolved.map((u) => esc(u.from) + " → " + esc(u.to)).join(", ") +
+          " oraligʻidagi yoʻl boshqa davlat hududidan oʻtadi — Oʻzbekiston ichida muqobil yoʻl topilmadi (masalan, anklav manzillar uchun).";
+      } else if (r.border.detoured) {
+        $("#source-note").innerHTML += " Marshrut Oʻzbekiston hududidan chiqmaydi: boshqa davlat orqali oʻtadigan yoʻl " +
+          r.border.detoured + " ta qismda ichki yoʻl bilan almashtirildi, shu sababli masofa biroz uzunroq boʻlishi mumkin." +
+          " Google va Yandex havolalariga aylanma yoʻl nuqtalari ham qoʻshildi.";
+      }
+    }
   }
 
   function stat(k, v, sub) {
