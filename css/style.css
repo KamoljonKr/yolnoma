@@ -192,6 +192,15 @@ code, .mono { font-family: var(--f-mono); font-size: 12.5px; }
 .pos-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .place-card.pinned { border-color: var(--accent); }
 .place-card.pinned .pos-input { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+/* Manzilga biriktirilgan havola */
+.pc-text a.link-chip, .it-link {
+  display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; max-width: 100%;
+  margin-top: 3px; font: 500 12px var(--f-body); color: var(--accent); text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pc-text a.link-chip:hover, .it-link:hover { text-decoration: underline; }
+.link-chip svg, .it-link svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.it-link { grid-column: 2; justify-self: start; margin: -2px 0 4px 8px; }
 /* Oʻzim uchun izoh: kiritish maydoni va roʻyxat/marshrutdagi belgisi */
 .field.note-field input { font-family: var(--f-body); font-size: 14px; padding: 10px 12px; }
 .note-field small { font-size: 11.5px; opacity: .85; }

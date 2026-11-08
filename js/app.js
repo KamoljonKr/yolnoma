@@ -40,6 +40,24 @@
   let pickMode = null;        // "start" | "stop" | null
   const details = new Map();  // id -> {info, weather, wiki, nearby:{radius:data}}
 
+  /** Havolani tozalaydi: faqat http(s). Boʻsh -> "", yaroqsiz -> null. Sxemasiz ("t.me/x") yozuvga https:// qoʻshiladi. */
+  function cleanUrl(raw) {
+    let t = String(raw || "").trim();
+    if (!t) return "";
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(t)) t = "https://" + t;
+    try {
+      const u = new URL(t);
+      if ((u.protocol !== "http:" && u.protocol !== "https:") || !u.hostname.includes(".")) return null;
+      return u.href.length <= 500 ? u.href : null;
+    } catch (_) { return null; }
+  }
+  const linkHost = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch (_) { return url; } };
+  const LINK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>';
+  /** Bosiladigan havola belgisi (HTML). cls — "link-chip" (kartada) yoki "it-link" (marshrut jadvalida). */
+  function linkTag(url, cls) {
+    return url ? '<a class="' + cls + '" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer" title="' + esc(url) + '">' + LINK_ICON + esc(linkHost(url)) + "</a>" : "";
+  }
+
   function place(p) {
     return {
       id: p.id || newId(),
@@ -49,13 +67,14 @@
       category: p.category || "", type: p.type || "", addresstype: p.addresstype || "",
       region: p.region || "", district: p.district || "", city: p.city || "",
       note: String(p.note || "").trim().slice(0, 80), // foydalanuvchining oʻzi uchun izohi
+      link: cleanUrl(p.link) || "", // manzilga biriktirilgan qoʻshimcha havola
       pin: Number.isInteger(Number(p.pin)) && Number(p.pin) > 0 ? Number(p.pin) : 0, // qoʻlda belgilangan tashrif oʻrni (0 — avtomatik)
     };
   }
 
   function serialize() {
     const slim = (p) => p && ({ name: p.name, address: p.address, lat: +p.lat.toFixed(6), lon: +p.lon.toFixed(6),
-      category: p.category, type: p.type, region: p.region, note: p.note || "", pin: p.pin || 0 });
+      category: p.category, type: p.type, region: p.region, note: p.note || "", link: p.link || "", pin: p.pin || 0 });
     return {
       start: slim(state.start), stops: state.stops.map(slim), metric: state.metric, roundTrip: state.roundTrip,
       depart: state.depart, stay: state.stay, fuelRate: state.fuelRate, fuelPrice: state.fuelPrice, sample: state.sample,
@@ -173,10 +192,11 @@
       const visit = solved ? result.order.indexOf(s.id) + 1 : 0;
       return '<li class="place-card' + (s.pin ? " pinned" : "") + '" data-id="' + s.id + '">' +
         '<span class="badge ' + (solved ? "" : "pending") + '" title="' + (solved ? "Tashrif tartibi" : "Kiritilgan tartib") + '">' + (solved ? visit : i + 1) + "</span>" +
-        '<div class="pc-text">' + noteTag(s.note) + "<b>" + esc(s.name) + "</b><span>" + esc(s.address || Geo.fmtCoord(s.lat, s.lon)) + "</span></div>" +
+        '<div class="pc-text">' + noteTag(s.note) + "<b>" + esc(s.name) + "</b><span>" + esc(s.address || Geo.fmtCoord(s.lat, s.lon)) + "</span>" + linkTag(s.link, "link-chip") + "</div>" +
         '<div class="pc-actions">' +
         '<input class="pos-input" type="number" inputmode="numeric" min="1" max="' + state.stops.length + '" step="1" value="' + (s.pin || "") + '" placeholder="' + (solved ? visit : i + 1) + '"' +
         ' title="Tashrif tartibidagi oʻrni. Raqam yozsangiz, manzil aynan shu oʻringa qoʻyiladi va marshrut qayta hisoblanadi. Boʻsh qoldirsangiz — avtomatik." aria-label="Tashrif tartibidagi oʻrni">' +
+        '<button class="icon-btn" type="button" data-act="link" title="Havola qoʻshish / oʻzgartirish">' + LINK_ICON + "</button>" +
         '<button class="icon-btn" type="button" data-act="note" title="Izoh yozish / oʻzgartirish"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></button>' +
         '<button class="icon-btn" type="button" data-act="info" title="Joy haqida"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></button>' +
         '<button class="icon-btn" type="button" data-act="remove" title="Oʻchirish"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>' +
@@ -205,7 +225,7 @@
   });
 
   $("#stop-list").addEventListener("click", (e) => {
-    if (e.target.closest(".pos-input")) return;
+    if (e.target.closest(".pos-input") || e.target.closest("a")) return;
     const btn = e.target.closest("button[data-act]");
     const li = e.target.closest("li[data-id]");
     if (!li) return;
@@ -213,6 +233,17 @@
     if (btn && btn.dataset.act === "remove") {
       state.stops = state.stops.filter((s) => s.id !== id);
       changed();
+    } else if (btn && btn.dataset.act === "link") {
+      const s = state.stops.find((x) => x.id === id);
+      if (!s) return;
+      const v = window.prompt("Havola (http/https). Boʻsh qoldirsangiz, havola oʻchadi:", s.link || "");
+      if (v === null) return;
+      const l = cleanUrl(v);
+      if (l === null) { toast("Havola yaroqsiz (http yoki https bilan boshlanadigan toʻliq manzil kerak).", "warn"); return; }
+      s.link = l;
+      save();
+      renderAll();
+      if (result && !result.stale) renderResult();
     } else if (btn && btn.dataset.act === "note") {
       const s = state.stops.find((x) => x.id === id);
       if (!s) return;
@@ -360,17 +391,26 @@
   }
 
   const noteInput = $("#stop-note");
-  noteInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); $("#stop-input").focus(); }
-  });
+  const linkInput = $("#stop-link");
+  for (const el of [noteInput, linkInput]) {
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); (el === noteInput ? linkInput : $("#stop-input")).focus(); }
+    });
+  }
 
-  function addStop(p, needsName, useNote) {
+  function addStop(p, needsName, useExtras) {
     const dup = state.stops.find((s) => Geo.haversine(s, p) < 30);
     if (dup) { toast("“" + dup.name + "” allaqachon roʻyxatda bor."); return false; }
-    if (useNote !== false) {
+    if (useExtras !== false) { // izoh va havola inputlaridagi qiymat shu manzilga biriktiriladi
       const note = noteInput.value.trim().slice(0, 80);
       if (note) p.note = note;
       noteInput.value = "";
+      const rawLink = linkInput.value.trim();
+      if (rawLink) {
+        const l = cleanUrl(rawLink);
+        if (l) { p.link = l; linkInput.value = ""; }
+        else toast("Havola yaroqsiz (http yoki https bilan boshlanadigan toʻliq manzil kerak), saqlanmadi.", "warn");
+      }
     }
     state.stops.push(p);
     changed();
@@ -657,7 +697,7 @@
       if (!s || !leg) return;
       t += leg.duration;
       rows.push(legRow(leg));
-      rows.push(itRow({ badge: String(i + 1), cls: "", name: s.name, note: s.note,
+      rows.push(itRow({ badge: String(i + 1), cls: "", name: s.name, note: s.note, link: s.link,
         sub: "Yetib borish " + clock(state.depart, t) + (s.pin ? " · oʻrni belgilangan" : "") + (state.stay ? " · ketish " + clock(state.depart, t + state.stay * 60) : ""),
         id: s.id, region: s.region }));
       t += state.stay * 60;
@@ -720,13 +760,14 @@
   }
   function itRow(o) {
     return '<li class="it-stop" data-id="' + o.id + '"><span class="badge ' + o.cls + '">' + o.badge + "</span>" +
-      '<button type="button" class="it-main">' + noteTag(o.note) + "<b>" + esc(o.name) + "</b><span>" + o.sub + "</span></button></li>";
+      '<button type="button" class="it-main">' + noteTag(o.note) + "<b>" + esc(o.name) + "</b><span>" + o.sub + "</span></button>" + linkTag(o.link, "it-link") + "</li>";
   }
   function legRow(leg) {
     return '<li class="it-leg"><span class="leg-line"></span><span>' + Geo.fmtKm(leg.distance) + " · " + Geo.fmtDuration(leg.duration) + "</span></li>";
   }
 
   $("#itinerary").addEventListener("click", (e) => {
+    if (e.target.closest("a")) return;
     const li = e.target.closest(".it-stop");
     if (li) openDrawer(li.dataset.id);
   });
@@ -738,7 +779,7 @@
     result.order.forEach((id, i) => {
       const s = stopById(id), leg = result.legs[i];
       lines.push("   ↓ " + Geo.fmtKm(leg.distance) + ", " + Geo.fmtDuration(leg.duration));
-      lines.push((i + 1) + ". " + (s.note ? s.note + " — " : "") + s.name + (s.address ? " (" + s.address + ")" : "") + " — " + s.lat.toFixed(5) + ", " + s.lon.toFixed(5));
+      lines.push((i + 1) + ". " + (s.note ? s.note + " — " : "") + s.name + (s.address ? " (" + s.address + ")" : "") + " — " + s.lat.toFixed(5) + ", " + s.lon.toFixed(5) + (s.link ? " — " + s.link : ""));
     });
     if (result.roundTrip) {
       const leg = result.legs[result.order.length];
@@ -859,15 +900,15 @@
         frame.src = "https://" + yDomain + "/map-widget/v1/?ll=" + p.lon + "%2C" + p.lat + "&z=17&l=sat%2Cskl&pt=" + p.lon + "%2C" + p.lat + "%2Cpm2rdm";
       }
     }
-    const links = [
+    const links = (p.link ? [["Saqlangan havola (" + linkHost(p.link) + ")", p.link]] : []).concat([
       ["Google Maps (yoʻldosh)", "https://www.google.com/maps/@?api=1&map_action=map&center=" + p.lat + "%2C" + p.lon + "&zoom=18&basemap=satellite"],
       ["Google Earth 3D", "https://earth.google.com/web/@" + p.lat + "," + p.lon + ",0a,700d,35y,0h,60t,0r"],
       ["Google Street View", "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" + p.lat + "%2C" + p.lon],
       ["Yandex Karta (yoʻldosh)", "https://" + yDomain + "/maps/?ll=" + p.lon + "%2C" + p.lat + "&z=17&l=sat&pt=" + p.lon + "%2C" + p.lat],
       ["Yandex panoramasi", "https://" + yDomain + "/maps/?ll=" + p.lon + "%2C" + p.lat + "&z=17&panorama%5Bpoint%5D=" + p.lon + "%2C" + p.lat],
       ["Bu yerga yoʻl (Google)", "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + p.lat + "%2C" + p.lon],
-    ];
-    $("#ext-links").innerHTML = links.map(([t, u]) => '<a href="' + u + '" target="_blank" rel="noopener">' + t +
+    ]);
+    $("#ext-links").innerHTML = links.map(([t, u]) => '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + esc(t) +
       ' <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>').join("");
   }
   $$('input[name="viewsrc"]').forEach((r) => { r.onchange = renderView; });
