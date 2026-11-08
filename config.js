@@ -10,5 +10,8 @@
 window.YOLNOMA_CONFIG = {
   googleMapsApiKey: "",
   yandexDomain: "yandex.uz",
-  supabase: { url: "", anonKey: "" },
+  supabase: {
+    url: "https://xgdhmxbipfxkghqjcxcj.supabase.co",
+    anonKey: "sb_publishable_ECts8uLZUQo2bPY1SVRD9g_D6vTJqq_",   // ochiq (publishable) kalit — maxfiy emas
+  },
 };

@@ -44,7 +44,9 @@
     const timer = ctl ? setTimeout(() => ctl.abort(), TIMEOUT_MS) : null;
     try {
       const headers = Object.assign({ apikey: c.key, "Content-Type": "application/json" }, (opts && opts.headers) || {});
-      headers.Authorization = "Bearer " + (token || c.key);
+      // Yangi "sb_publishable_…" kaliti JWT emas: Authorization sarlavhasiga faqat foydalanuvchi tokeni yoki eski (JWT) anon kalit qoʻyiladi
+      if (token) headers.Authorization = "Bearer " + token;
+      else if (/^eyJ/.test(c.key)) headers.Authorization = "Bearer " + c.key;
       const res = await global.fetch(c.url + path, { method: (opts && opts.method) || "GET", headers, body: opts && opts.body !== undefined ? JSON.stringify(opts.body) : undefined, signal: ctl ? ctl.signal : undefined });
       return res;
     } finally { if (timer) clearTimeout(timer); }
