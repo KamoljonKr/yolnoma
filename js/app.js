@@ -48,12 +48,13 @@
       lat: Number(p.lat), lon: Number(p.lon),
       category: p.category || "", type: p.type || "", addresstype: p.addresstype || "",
       region: p.region || "", district: p.district || "", city: p.city || "",
+      note: String(p.note || "").trim().slice(0, 80), // foydalanuvchining oʻzi uchun izohi
     };
   }
 
   function serialize() {
     const slim = (p) => p && ({ name: p.name, address: p.address, lat: +p.lat.toFixed(6), lon: +p.lon.toFixed(6),
-      category: p.category, type: p.type, region: p.region });
+      category: p.category, type: p.type, region: p.region, note: p.note || "" });
     return {
       start: slim(state.start), stops: state.stops.map(slim), metric: state.metric, roundTrip: state.roundTrip,
       depart: state.depart, stay: state.stay, fuelRate: state.fuelRate, fuelPrice: state.fuelPrice, sample: state.sample,
@@ -128,7 +129,7 @@
       const label = solved ? String(visit) : String(i + 1);
       L.marker([s.lat, s.lon], { icon: pin(label, solved ? "stop" : "stop pending"), title: s.name })
         .on("click", () => openDrawer(s.id))
-        .bindTooltip((solved ? visit + "-manzil: " : "") + esc(s.name), { direction: "top", offset: [0, -36] })
+        .bindTooltip((solved ? visit + "-manzil: " : "") + esc(s.name) + (s.note ? " — " + esc(s.note) : ""), { direction: "top", offset: [0, -36] })
         .addTo(markerLayer);
     });
   }
@@ -159,6 +160,9 @@
     $('[data-act="remove"]', el).onclick = () => { state.start = null; changed(); };
   }
 
+  /** Foydalanuvchi izohi uchun kichik belgi (HTML). */
+  function noteTag(note) { return note ? '<em class="note">' + esc(note) + "</em>" : ""; }
+
   function renderStops() {
     const list = $("#stop-list");
     const solved = result && !result.stale;
@@ -168,8 +172,9 @@
       const visit = solved ? result.order.indexOf(s.id) + 1 : 0;
       return '<li class="place-card" data-id="' + s.id + '">' +
         '<span class="badge ' + (solved ? "" : "pending") + '" title="' + (solved ? "Tashrif tartibi" : "Kiritilgan tartib") + '">' + (solved ? visit : i + 1) + "</span>" +
-        '<div class="pc-text"><b>' + esc(s.name) + "</b><span>" + esc(s.address || Geo.fmtCoord(s.lat, s.lon)) + "</span></div>" +
+        '<div class="pc-text">' + noteTag(s.note) + "<b>" + esc(s.name) + "</b><span>" + esc(s.address || Geo.fmtCoord(s.lat, s.lon)) + "</span></div>" +
         '<div class="pc-actions">' +
+        '<button class="icon-btn" type="button" data-act="note" title="Izoh yozish / oʻzgartirish"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></button>' +
         '<button class="icon-btn" type="button" data-act="info" title="Joy haqida"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></button>' +
         '<button class="icon-btn" type="button" data-act="remove" title="Oʻchirish"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>' +
         "</div></li>";
@@ -184,6 +189,15 @@
     if (btn && btn.dataset.act === "remove") {
       state.stops = state.stops.filter((s) => s.id !== id);
       changed();
+    } else if (btn && btn.dataset.act === "note") {
+      const s = state.stops.find((x) => x.id === id);
+      if (!s) return;
+      const v = window.prompt("Oʻzim uchun izoh (boʻsh qoldirsangiz, izoh oʻchadi):", s.note || "");
+      if (v === null) return;
+      s.note = v.trim().slice(0, 80);
+      save();
+      renderAll();
+      if (result && !result.stale) renderResult();
     } else {
       openDrawer(id);
     }
@@ -321,9 +335,19 @@
     if (!Geo.inUzbekistan(p.lat, p.lon)) toast("Diqqat: bu nuqta Oʻzbekiston hududidan tashqarida.", "warn");
   }
 
-  function addStop(p, needsName) {
+  const noteInput = $("#stop-note");
+  noteInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); $("#stop-input").focus(); }
+  });
+
+  function addStop(p, needsName, useNote) {
     const dup = state.stops.find((s) => Geo.haversine(s, p) < 30);
     if (dup) { toast("“" + dup.name + "” allaqachon roʻyxatda bor."); return false; }
+    if (useNote !== false) {
+      const note = noteInput.value.trim().slice(0, 80);
+      if (note) p.note = note;
+      noteInput.value = "";
+    }
     state.stops.push(p);
     changed();
     if (needsName) enrichName(p);
@@ -356,10 +380,10 @@
         if (parsed && parsed.shortLink) { failed.push(lines[i] + " (qisqa havola)"); continue; }
         if (parsed) {
           const p = place({ name: Geo.fmtCoord(parsed.lat, parsed.lon), address: "", lat: parsed.lat, lon: parsed.lon });
-          if (addStop(p, true)) added++;
+          if (addStop(p, true, false)) added++;
         } else {
           const res = await API.search(lines[i]);
-          if (res.length) { if (addStop(place(res[0]), false)) added++; } else failed.push(lines[i]);
+          if (res.length) { if (addStop(place(res[0]), false, false)) added++; } else failed.push(lines[i]);
         }
       } catch (e) {
         failed.push(lines[i]);
@@ -578,7 +602,7 @@
       if (!s || !leg) return;
       t += leg.duration;
       rows.push(legRow(leg));
-      rows.push(itRow({ badge: String(i + 1), cls: "", name: s.name,
+      rows.push(itRow({ badge: String(i + 1), cls: "", name: s.name, note: s.note,
         sub: "Yetib borish " + clock(state.depart, t) + (state.stay ? " · ketish " + clock(state.depart, t + state.stay * 60) : ""),
         id: s.id, region: s.region }));
       t += state.stay * 60;
@@ -641,7 +665,7 @@
   }
   function itRow(o) {
     return '<li class="it-stop" data-id="' + o.id + '"><span class="badge ' + o.cls + '">' + o.badge + "</span>" +
-      '<button type="button" class="it-main"><b>' + esc(o.name) + "</b><span>" + o.sub + "</span></button></li>";
+      '<button type="button" class="it-main">' + noteTag(o.note) + "<b>" + esc(o.name) + "</b><span>" + o.sub + "</span></button></li>";
   }
   function legRow(leg) {
     return '<li class="it-leg"><span class="leg-line"></span><span>' + Geo.fmtKm(leg.distance) + " · " + Geo.fmtDuration(leg.duration) + "</span></li>";
@@ -659,7 +683,7 @@
     result.order.forEach((id, i) => {
       const s = stopById(id), leg = result.legs[i];
       lines.push("   ↓ " + Geo.fmtKm(leg.distance) + ", " + Geo.fmtDuration(leg.duration));
-      lines.push((i + 1) + ". " + s.name + (s.address ? " (" + s.address + ")" : "") + " — " + s.lat.toFixed(5) + ", " + s.lon.toFixed(5));
+      lines.push((i + 1) + ". " + (s.note ? s.note + " — " : "") + s.name + (s.address ? " (" + s.address + ")" : "") + " — " + s.lat.toFixed(5) + ", " + s.lon.toFixed(5));
     });
     if (result.roundTrip) {
       const leg = result.legs[result.order.length];
