@@ -138,9 +138,20 @@
     const geom = prepGeometry(input.geometry);
     const totalRouteM = legs.reduce((s, l) => s + (l.distance || 0), 0);
     const cities = input.cities || [];
-    let t = P.depart, routeM = 0;
+    // resume — jonli rejim: safar oʻrtasidan davom ettirish.
+    //   {index: keyingi manzil (0-dan; stops.length — qaytish yoʻli), t: hozirgi vaqt (daqiqa), frac: shu yoʻl qismining qolgan ulushi (0 — yetib kelgan),
+    //    fromName, firstDayLimit: birinchi kun uchun haydash chegarasi (ixtiyoriy)}
+    const resume = input.resume || null;
+    const first = resume ? Math.max(0, Math.min(stops.length, resume.index | 0)) : 0;
+    const frac = resume ? Math.max(0, Number(resume.frac)) : 1;
+    let t = resume ? resume.t : P.depart, routeM = 0;
+    const t0 = t, firstDay = dayOf(t0 + EPS);
+    if (resume) {
+      for (let j = 0; j < first; j++) routeM += legs[j].distance || 0;
+      if (legs[first]) routeM += (legs[first].distance || 0) * Math.max(0, 1 - frac);
+    }
     const push = (e) => { events.push(e); return e; };
-    push({ type: "depart", start: t, end: t, place: start.name });
+    push({ type: "depart", start: t, end: t, place: resume ? (resume.fromName || "Hozirgi joy") : start.name });
 
     function placeLabel() {
       if (!geom || !(totalRouteM > 0)) return "yoʻlda";
@@ -167,7 +178,8 @@
       let remaining = total, guard = 0;
       while (remaining > EPS) {
         if (++guard > 500) throw new Error("Hisoblash tsikli chegaradan oshdi");
-        const dayEnd = dayOf(t) * 1440 + P.driveLimit;
+        const lim = resume && resume.firstDayLimit != null && dayOf(t + EPS) === firstDay ? resume.firstDayLimit : P.driveLimit;
+        const dayEnd = dayOf(t) * 1440 + lim;
         if (t >= dayEnd - EPS) { // bugun haydash vaqti tugagan
           const road = info.segments.length > 0;
           info.nights.push(sleep(road ? "road" : "hotel", road ? placeLabel() : fromName, P.depart, heading));
@@ -183,12 +195,14 @@
 
     let overrun = false;
     const stopRes = [];
-    let prevName = start.name;
+    let prevName = resume ? (resume.fromName || "Hozirgi joy") : start.name;
+    const scaled = (l, k) => (k === 1 ? l : { distance: (l.distance || 0) * k, duration: (l.duration || 0) * k });
     stops.forEach((s, i) => {
+      if (i < first) return;
       // Manzilning oʻz turish vaqti (daqiqa) bor boʻlsa — oʻshani, boʻlmasa umumiyni olamiz
       const stay = Number.isFinite(s.stay) && s.stay >= 0 ? s.stay : P.stay;
       const need = Math.min(stay, P.workEnd - P.workStart);
-      const leg = drive(prevName, s.name, legs[i], (i + 1) + "-manzil (" + s.name + ")");
+      const leg = drive(prevName, s.name, scaled(legs[i], i === first ? frac : 1), (i + 1) + "-manzil (" + s.name + ")");
       const arrive = t, day = dayOf(arrive), time = arrive - day * 1440;
       let workStart;
       if (time <= P.workStart + EPS) workStart = day * 1440 + P.workStart;       // erta keldik: ish boshlanishini kutamiz
@@ -212,7 +226,7 @@
 
     let ret = null;
     if (roundTrip) {
-      const leg = drive(prevName, start.name, legs[stops.length], "qaytish (" + start.name + ")");
+      const leg = drive(prevName, start.name, scaled(legs[stops.length], first === stops.length ? frac : 1), "qaytish (" + start.name + ")");
       ret = { leg, arrive: t };
       push({ type: "return", start: t, end: t, place: start.name });
     } else {
@@ -224,7 +238,7 @@
     const items = new Map();
     const add = (time, item) => { const d = dayOf(time + EPS); if (!items.has(d)) items.set(d, []); items.get(d).push(Object.assign({ time }, item)); };
     const PRI = { depart: 0, stop: 1, work2: 2, night: 3, return: 4, end: 4 };
-    add(P.depart, { kind: "depart", place: start.name });
+    add(t0, { kind: "depart", place: resume ? (resume.fromName || "Hozirgi joy") : start.name });
     for (const sr of stopRes) {
       add(sr.arrive, { kind: "stop", sr });
       if (dayOf(sr.workStart + EPS) !== dayOf(sr.arrive + EPS)) add(sr.workStart, { kind: "work2", sr });
@@ -246,7 +260,7 @@
     const nights = events.filter((e) => e.type === "night").length;
     const summary = {
       endTime: t, endDay: dayOf(t + EPS), days: lastDay + 1, nights,
-      driveMin, workMin, km: legs.slice(0, stops.length + (roundTrip ? 1 : 0)).reduce((s, l) => s + (l.distance || 0), 0) / 1000,
+      driveMin, workMin, km: resume ? events.filter((e) => e.type === "drive").reduce((a, e) => a + e.km, 0) : legs.slice(0, stops.length + (roundTrip ? 1 : 0)).reduce((a, l) => a + (l.distance || 0), 0) / 1000,
       postponed: stopRes.filter((r) => r.postponed).length,
     };
     return { params: P, events, stops: stopRes, days, summary, warnings, roundTrip, start };

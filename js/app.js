@@ -35,6 +35,7 @@
     fuelRate: 8,
     fuelPrice: 10500,
     sample: false,
+    work: { start: "10:00", end: "18:00", limit: "" },  // ish oynasi (hisobot va jonli rejim uchun)
   };
   let result = null;          // hisoblangan marshrut
   let readonly = false;       // ulashilgan havola: faqat koʻrish (tahrirlash va saqlash yoʻq)
@@ -91,6 +92,7 @@
     return {
       start: slim(state.start), stops: state.stops.map(slim), metric: state.metric, roundTrip: state.roundTrip,
       depart: state.depart, stay: state.stay, fuelRate: state.fuelRate, fuelPrice: state.fuelPrice, sample: forShare ? false : state.sample,
+      work: state.work,
     };
   }
 
@@ -99,6 +101,10 @@
     state.stops = (data.stops || []).filter((s) => Geo.validLatLon(+s.lat, +s.lon)).map(place);
     for (const k of ["metric", "roundTrip", "depart", "stay", "fuelRate", "fuelPrice", "sample"]) {
       if (data[k] !== undefined) state[k] = data[k];
+    }
+    if (data.work && typeof data.work === "object") {
+      const hm = (v, d) => (/^\d{2}:\d{2}$/.test(String(v || "")) ? String(v) : d);
+      state.work = { start: hm(data.work.start, "10:00"), end: hm(data.work.end, "18:00"), limit: hm(data.work.limit, "") };
     }
   }
 
@@ -295,6 +301,7 @@
   });
 
   function changed(opts) {
+    if (lv && lv.on) stopLive("Safar oʻzgartirildi — jonli rejim toʻxtatildi.");
     if (state.sample && !(opts && opts.keepSample)) state.sample = false;
     if (result) result.stale = true;
     save();
@@ -640,6 +647,7 @@
       renderResult();
       drawRoute();
       fitAll();
+      tryResumeLive();
       if (window.matchMedia("(max-width: 900px)").matches) $("#result").scrollIntoView({ behavior: "smooth" });
     } catch (e) {
       console.error(e);
@@ -1177,6 +1185,332 @@
     }
   }
 
+  /* ---------------- Jonli safar ("Safarni boshlash") ---------------- */
+
+  const LIVE_KEY = "yolnoma.live.v1";
+  const lv = {
+    on: false, st: null, base: [], P: null, ctx: null, bounds: null,
+    fix: null, rem: null, proj: null, watchId: null, wake: null, tick: null,
+    follow: true, min: false, gpsMsg: "", prev: null,
+  };
+  const liveLayer = L.layerGroup().addTo(map);
+  let meAcc = null, meDot = null;
+
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const localISO = (ms) => { const d = new Date(ms); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); };
+  const hm = (ms) => { const d = new Date(ms); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); };
+  /** "14:30" + (ertaga) / (10.11) — bugungi kunga nisbatan */
+  function fmtAt(ms) {
+    const now = new Date(Live.now()), d = new Date(ms);
+    const a = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const b = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const diff = Math.round((b - a) / 86400000);
+    const tag = diff === 0 ? "" : diff === 1 ? " (ertaga)" : diff === -1 ? " (kecha)" : " (" + pad2(d.getDate()) + "." + pad2(d.getMonth() + 1) + ")";
+    return hm(ms) + tag;
+  }
+  const clockSec = (sec) => { sec = Math.max(0, Math.floor(sec)); return pad2(Math.floor(sec / 3600)) + ":" + pad2(Math.floor(sec % 3600 / 60)) + ":" + pad2(sec % 60); };
+
+  function liveSig() {
+    if (!result || !state.start) return "";
+    const pts = [state.start].concat(result.order.map(stopById).filter(Boolean));
+    return pts.map((p) => p.lat.toFixed(4) + "," + p.lon.toFixed(4)).join("|") + (result.roundTrip ? "|R" : "");
+  }
+
+  function liveContext() {
+    const stops = result.order.map(stopById).filter(Boolean);
+    const pts = [state.start].concat(stops, result.roundTrip ? [state.start] : []);
+    return {
+      start: state.start, stops, legs: result.legs, roundTrip: result.roundTrip, geometry: result.geometry,
+      cities: Border.HUBS, params: lv.P,
+      bounds: result.geometry && result.geometry.length > 1 ? Live.legBounds(result.geometry, pts) : null,
+    };
+  }
+
+  function liveParams(nowMs) {
+    const w = state.work || {};
+    return Report.normalizeParams({
+      date: localISO(nowMs), depart: state.depart || "08:00", workStart: w.start || "10:00", workEnd: w.end || "18:00",
+      driveLimit: w.limit || "", stayMin: state.stay,
+    });
+  }
+
+  function liveSave() {
+    try {
+      localStorage.setItem(LIVE_KEY, JSON.stringify({ sig: liveSig(), st: lv.st, base: lv.base, P: lv.P, saved: Live.now() }));
+    } catch (_) { /* noop */ }
+  }
+  function liveForget() { try { localStorage.removeItem(LIVE_KEY); } catch (_) { /* noop */ } }
+
+  /** Ushbu holatdan qolgan safarni qayta hisoblaydi. */
+  function liveRecompute() {
+    if (!lv.on || !lv.ctx) return;
+    const st = lv.st, ctx = lv.ctx, now = Live.now();
+    if (st.finished) { lv.proj = null; return; }
+    let frac = 1, fromName = "Hozirgi joy";
+    lv.rem = null;
+    if (st.phase === "drive") {
+      const target = Live.targetOf(st, state.start, ctx.stops, ctx.roundTrip);
+      const planned = ctx.legs[st.idx] ? ctx.legs[st.idx].distance : 0;
+      if (lv.fix && target) {
+        lv.rem = Live.remaining(ctx.bounds ? result.geometry : null, ctx.bounds, st.idx, lv.fix, target, planned);
+        frac = lv.rem.frac;
+      } else if (st.idx > 0 || st.arrivals.length) fromName = st.idx > 0 && ctx.stops[st.idx - 1] ? ctx.stops[st.idx - 1].name : fromName;
+    }
+    try { lv.proj = Live.project(ctx, { state: st, nowMs: now, frac, fromName }); }
+    catch (e) { console.error(e); lv.proj = null; }
+  }
+
+  function liveEsc(s) { return esc(String(s)); }
+
+  function deltaTag(minDiff) {
+    if (minDiff > 5) return '<span class="lv-late">+' + Geo.fmtDuration(minDiff * 60) + " ortda</span>";
+    if (minDiff < -5) return '<span class="lv-early">' + Geo.fmtDuration(-minDiff * 60) + " oldinda</span>";
+    return '<span class="lv-ok">reja boʻyicha</span>';
+  }
+
+  function renderLive() {
+    if (!lv.on) return;
+    const st = lv.st, ctx = lv.ctx, now = Live.now(), P = lv.P;
+    const now$ = $("#lv-now"), stats = $("#lv-stats"), acts = $("#lv-actions"), next = $("#lv-next");
+    $("#lv-title").textContent = st.finished ? "Safar yakunlandi" : "Safar davom etmoqda";
+    $(".live").classList.toggle("min", lv.min);
+    $("#lv-min").setAttribute("aria-expanded", String(!lv.min));
+    let nowHtml = "", statHtml = "", actHtml = "";
+    const proj = lv.proj;
+    const target = Live.targetOf(st, state.start, ctx.stops, ctx.roundTrip);
+
+    if (st.finished) {
+      nowHtml = "<b>Hamma manzillar tugadi.</b> Safaringiz xayrli boʻlsin!";
+      actHtml = '<button class="btn" data-lv="close" type="button">Yopish</button>';
+    } else if (st.phase === "drive" && target) {
+      const label = target.isReturn ? "Boshlangʻich nuqtaga qaytish" : target.n + "-manzilga yoʻlda";
+      nowHtml = '<span class="lv-kicker">' + label + "</span><b>" + liveEsc(target.name) + "</b>" +
+        (!target.isReturn && ctx.stops[st.idx] && ctx.stops[st.idx].note ? '<em class="note">' + liveEsc(ctx.stops[st.idx].note) + "</em>" : "");
+      const legM = ctx.legs[st.idx] ? ctx.legs[st.idx].distance : 0, legS = ctx.legs[st.idx] ? ctx.legs[st.idx].duration : 0;
+      const meters = lv.rem ? lv.rem.meters : legM, fracUsed = lv.rem ? lv.rem.frac : 1;
+      statHtml += '<div class="lv-stat"><span>Qoldi</span><b>' + Geo.fmtKm(meters) + "</b></div>";
+      statHtml += '<div class="lv-stat"><span>Rulda</span><b>~' + Geo.fmtDuration(legS * fracUsed) + "</b></div>";
+      let arriveMs = null;
+      if (proj) arriveMs = target.isReturn ? Live.toMs(proj.summary.endTime, P) : (proj.stops[0] ? Live.toMs(proj.stops[0].arrive, P) : null);
+      if (arriveMs) {
+        statHtml += '<div class="lv-stat wide"><span>Yetib borish</span><b>' + fmtAt(arriveMs) + "</b></div>";
+        const base = lv.base[st.idx];
+        if (base && !target.isReturn) statHtml += '<div class="lv-stat wide"><span>Rejaga nisbatan</span><b>' + deltaTag((arriveMs - base) / 60000) + "</b></div>";
+      }
+      if (lv.rem && lv.rem.offRoute) nowHtml += '<div class="lv-warn">Marshrut chizigʻidan ' + Geo.fmtKm(lv.rem.offM) + " chetdasiz — masofa taxminiy.</div>";
+      actHtml = '<button class="btn" data-lv="arrive" type="button">Yetib keldim</button>';
+    } else if (st.phase === "work" && target) {
+      const sr = proj && proj.stops[0];
+      nowHtml = '<span class="lv-kicker">' + target.n + "-manzildasiz</span><b>" + liveEsc(target.name) + "</b>" +
+        (ctx.stops[st.idx] && ctx.stops[st.idx].note ? '<em class="note">' + liveEsc(ctx.stops[st.idx].note) + "</em>" : "");
+      if (sr) {
+        const ws = Live.toMs(sr.workStart, P), we = Live.toMs(sr.workEnd, P);
+        if (now < ws) {
+          statHtml += '<div class="lv-stat wide"><span>Ish boshlanishigacha</span><b class="lv-clock">' + clockSec((ws - now) / 1000) + "</b></div>";
+          statHtml += '<div class="lv-stat wide"><span>Ish vaqti</span><b>' + fmtAt(ws) + " – " + hm(we) + "</b></div>";
+          if (sr.postponed) nowHtml += '<div class="lv-warn">Bugun ish ulgurilmaydi — mehmonxonada tunab, ' + fmtAt(ws) + " da boshlanadi.</div>";
+        } else if (now < we) {
+          statHtml += '<div class="lv-stat wide"><span>Ish tugashiga</span><b class="lv-clock">' + clockSec((we - now) / 1000) + "</b></div>";
+          statHtml += '<div class="lv-stat wide"><span>Ish vaqti</span><b>' + hm(ws) + " – " + hm(we) + "</b></div>";
+        } else {
+          statHtml += '<div class="lv-stat wide"><span>Ish vaqti tugadi</span><b class="lv-late">' + hm(we) + " da tugashi kerak edi</b></div>";
+        }
+      }
+      const isLast = st.idx + 1 >= ctx.stops.length && !ctx.roundTrip;
+      actHtml = '<button class="btn" data-lv="finish" type="button">' + (isLast ? "Ishni tugatdim — safarni yakunlash" : "Ishni tugatdim — keyingisiga") + "</button>";
+    }
+    if (lv.prev) actHtml += '<button class="btn ghost" data-lv="undo" type="button">↶ Ortga</button>';
+    actHtml += '<button class="btn ghost" data-lv="follow" type="button">' + (lv.follow ? "Kuzatish: yoniq" : "Joylashuvimga qaytish") + "</button>";
+    if (now$.innerHTML !== nowHtml) now$.innerHTML = nowHtml;
+    if (stats.innerHTML !== statHtml) stats.innerHTML = statHtml;
+    if (acts.innerHTML !== actHtml) acts.innerHTML = actHtml;
+
+    // Keyingi manzillar
+    let rows = "";
+    if (proj && !st.finished) {
+      const list = proj.stops.filter((r) => r.n !== st.idx + 1);   // hozirgi manzil yuqorida koʻrsatilgan
+      const shown = list.slice(0, 6);
+      rows = shown.map((r) => {
+        const arr = Live.toMs(r.arrive, P), ws = Live.toMs(r.workStart, P), we = Live.toMs(r.workEnd, P);
+        const base = lv.base[r.n - 1];
+        return "<li><span class=\"lv-n\">" + r.n + "</span><div><b>" + liveEsc(r.stop.name) + "</b><span>yetib borish " + fmtAt(arr) +
+          " · ish " + hm(ws) + "–" + hm(we) + (r.postponed ? " (ertasi kuni)" : "") + "</span>" +
+          (base ? "<span>" + deltaTag((arr - base) / 60000) + "</span>" : "") + "</div></li>";
+      }).join("");
+      if (list.length > shown.length) rows += '<li class="lv-more">… yana ' + (list.length - shown.length) + " ta manzil</li>";
+      rows += '<li class="lv-end">Safar tugashi: <b>' + fmtAt(Live.toMs(proj.summary.endTime, P)) + "</b></li>";
+    }
+    if (next.innerHTML !== rows) next.innerHTML = rows;
+
+    // GPS holati
+    let gps = lv.gpsMsg;
+    if (!gps && lv.fix) {
+      const age = Math.max(0, Math.round((now - lv.fix.t) / 1000));
+      gps = "GPS: aniqlik ±" + Math.round(lv.fix.acc || 0) + " m · " + (age < 5 ? "hozir" : age + " soniya oldin");
+    } else if (!gps) gps = "GPS signali kutilmoqda…";
+    $("#lv-gps").textContent = gps;
+  }
+
+  function liveNotify(msg) {
+    toast(msg);
+    try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (_) { /* noop */ }
+  }
+
+  function liveSnapshot() { lv.prev = JSON.stringify(lv.st); }
+
+  function liveDoArrive(auto) {
+    const st = lv.st;
+    if (st.finished || st.phase !== "drive") return;
+    const target = Live.targetOf(st, state.start, lv.ctx.stops, lv.ctx.roundTrip);
+    liveSnapshot();
+    Live.arrive(st, Live.now(), lv.ctx.stops.length, lv.ctx.roundTrip);
+    liveNotify((target && target.isReturn ? "Boshlangʻich nuqtaga yetib keldingiz." : (target ? target.n + "-manzilga yetib keldingiz" : "Yetib keldingiz") + (auto ? " (GPS aniqladi)." : ".")));
+    liveAfterChange();
+  }
+
+  function liveDoFinish() {
+    const st = lv.st;
+    if (st.finished || st.phase !== "work") return;
+    liveSnapshot();
+    Live.finishWork(st, Live.now(), lv.ctx.stops.length, lv.ctx.roundTrip);
+    liveAfterChange();
+  }
+
+  function liveAfterChange() {
+    lv.rem = null;
+    liveRecompute();
+    liveSave();
+    renderLive();
+    if (lv.fix && lv.follow && !lv.st.finished) liveCenter();
+  }
+
+  function liveCenter() {
+    if (!lv.fix) return;
+    const z = Math.max(map.getZoom(), 12);
+    map.setView([lv.fix.lat, lv.fix.lon], z, { animate: true });
+  }
+
+  function liveDraw() {
+    if (!lv.fix) return;
+    const ll = [lv.fix.lat, lv.fix.lon];
+    if (!meDot) {
+      meAcc = L.circle(ll, { radius: lv.fix.acc || 20, color: "#2f6fed", weight: 1, fillColor: "#2f6fed", fillOpacity: 0.12, interactive: false }).addTo(liveLayer);
+      meDot = L.circleMarker(ll, { radius: 8, color: "#fff", weight: 3, fillColor: "#2f6fed", fillOpacity: 1, interactive: false }).addTo(liveLayer);
+    } else { meAcc.setLatLng(ll); meAcc.setRadius(lv.fix.acc || 20); meDot.setLatLng(ll); }
+  }
+
+  function liveOnPosition(pos) {
+    const c = pos.coords;
+    lv.fix = { lat: c.latitude, lon: c.longitude, acc: c.accuracy, speed: c.speed, t: pos.timestamp || Live.now() };
+    lv.gpsMsg = "";
+    liveDraw();
+    if (lv.follow && !lv.centered) { lv.centered = true; liveCenter(); }
+    else if (lv.follow) map.panTo([lv.fix.lat, lv.fix.lon], { animate: true });
+    const target = Live.targetOf(lv.st, state.start, lv.ctx.stops, lv.ctx.roundTrip);
+    if (Live.onFix(lv.st, lv.fix, target)) { liveDoArrive(true); return; }
+    liveRecompute();
+    renderLive();
+  }
+
+  function liveOnError(err) {
+    const msgs = { 1: "GPS ruxsati berilmadi. Telefon sozlamalarida joylashuvga ruxsat bering. Hozircha tugmalar bilan boshqaring.", 2: "Joylashuvni aniqlab boʻlmadi. Ochiq joyga chiqing.", 3: "GPS javob bermadi, qayta urinilmoqda…" };
+    lv.gpsMsg = msgs[err && err.code] || "GPS xatosi.";
+    renderLive();
+  }
+
+  async function liveWake() {
+    try {
+      if (navigator.wakeLock && navigator.wakeLock.request) {
+        lv.wake = await navigator.wakeLock.request("screen");
+        lv.wake.addEventListener && lv.wake.addEventListener("release", () => { lv.wake = null; });
+      }
+    } catch (_) { lv.wake = null; }
+  }
+  document.addEventListener("visibilitychange", () => { if (lv.on && document.visibilityState === "visible" && !lv.wake) liveWake(); });
+
+  function liveBegin(restored) {
+    lv.on = true; lv.centered = false; lv.fix = null; lv.gpsMsg = "";
+    lv.ctx = liveContext();
+    $("#live").hidden = false;
+    document.body.classList.add("live-on");
+    if (navigator.geolocation) {
+      lv.watchId = navigator.geolocation.watchPosition(liveOnPosition, liveOnError, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+    } else lv.gpsMsg = "Brauzeringiz GPS'ni qoʻllamaydi. Tugmalar bilan boshqaring.";
+    liveWake();
+    clearInterval(lv.tick);
+    let n = 0;
+    lv.tick = setInterval(() => { if (++n % 20 === 0) liveRecompute(); renderLive(); }, 1000);
+    liveRecompute();
+    renderLive();
+    if (!restored) {
+      const mw = document.querySelector(".map-wrap");
+      if (mw && window.matchMedia("(max-width: 900px)").matches && mw.scrollIntoView) mw.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  function startLive() {
+    if (!result || result.stale || !state.start) { toast("Avval marshrutni hisoblang."); return; }
+    if (lv.on) return;
+    const nowMs = Live.now();
+    const np = liveParams(nowMs);
+    if (!np.ok) { toast("Ish vaqti sozlamasi notoʻgʻri: " + np.errors[0], "warn"); return; }
+    lv.P = np.P;
+    lv.st = Live.create(nowMs);
+    lv.prev = null;
+    lv.ctx = liveContext();
+    // Reja (taqqoslash uchun): hozir yoʻlga chiqsak, har manzilga qachon yetib boramiz
+    try {
+      const base = Live.project(lv.ctx, { state: lv.st, nowMs, frac: 1, fromName: state.start.name });
+      lv.base = []; base.stops.forEach((r) => { lv.base[r.n - 1] = Live.toMs(r.arrive, lv.P); });
+    } catch (e) { console.error(e); lv.base = []; }
+    liveSave();
+    liveBegin(false);
+  }
+
+  function stopLive(msg) {
+    if (!lv.on) return;
+    lv.on = false;
+    if (lv.watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(lv.watchId);
+    lv.watchId = null;
+    clearInterval(lv.tick); lv.tick = null;
+    try { if (lv.wake && lv.wake.release) lv.wake.release(); } catch (_) { /* noop */ }
+    lv.wake = null;
+    liveLayer.clearLayers(); meDot = null; meAcc = null;
+    $("#live").hidden = true;
+    document.body.classList.remove("live-on");
+    liveForget();
+    if (msg) toast(msg);
+  }
+
+  /** Sahifa qayta ochilsa — jonli safar shu yerdan davom etadi. */
+  function tryResumeLive() {
+    if (lv.on || !result || result.stale) return;
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(LIVE_KEY) || "null"); } catch (_) { /* noop */ }
+    if (!saved || !saved.st || saved.sig !== liveSig()) return;
+    if (Live.now() - (saved.saved || 0) > 3 * 86400000) { liveForget(); return; }
+    lv.st = saved.st; lv.base = saved.base || []; lv.P = saved.P; lv.prev = null;
+    if (!lv.P || !lv.P.date) { liveForget(); return; }
+    if (lv.st.finished) { liveForget(); return; }
+    liveBegin(true);
+    toast("Jonli safar davom ettirildi.");
+  }
+
+  $("#btn-live").onclick = startLive;
+  $("#lv-stop").onclick = () => { if (!lv.on) return; if (lv.st && lv.st.finished || window.confirm("Safarni toʻxtatamizmi? Joriy holat oʻchiriladi.")) stopLive(); };
+  $("#lv-min").onclick = () => { lv.min = !lv.min; renderLive(); };
+  $("#live").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-lv]");
+    if (!b || !lv.on) return;
+    const a = b.dataset.lv;
+    if (a === "arrive") liveDoArrive(false);
+    else if (a === "finish") liveDoFinish();
+    else if (a === "close") stopLive();
+    else if (a === "undo" && lv.prev) { lv.st = JSON.parse(lv.prev); lv.prev = null; liveAfterChange(); }
+    else if (a === "follow") { lv.follow = true; liveCenter(); renderLive(); }
+  });
+  map.on("dragstart", () => { if (lv.on && lv.follow) { lv.follow = false; renderLive(); } });
+
   /* ---------------- Safar hisoboti ---------------- */
 
   const REPORT_KEY = "yolnoma.report.v1";
@@ -1226,7 +1560,9 @@
   }
 
   function saveReportPrefs() {
-    try { localStorage.setItem(REPORT_KEY, JSON.stringify({ start: RP.start.value, end: RP.end.value, limit: RP.limit.value })); } catch (_) { /* noop */ }
+    state.work = { start: RP.start.value || "10:00", end: RP.end.value || "18:00", limit: RP.limit.value || "" };
+    save();
+    try { localStorage.setItem(REPORT_KEY, JSON.stringify(state.work)); } catch (_) { /* noop */ }
   }
 
   function openReport() {
@@ -1237,9 +1573,11 @@
     if (!RP.date.value || RP.date.value < todayISO()) RP.date.value = tomorrowISO();
     RP.depart.value = state.depart || "08:00";     // saytdagi "Joʻnash vaqti"
     RP.stay.value = state.stay;                    // saytdagi "Har manzilda turish"
-    RP.start.value = /^\d{2}:\d{2}$/.test(prefs.start || "") ? prefs.start : "10:00";
-    RP.end.value = /^\d{2}:\d{2}$/.test(prefs.end || "") ? prefs.end : "18:00";
-    RP.limit.value = /^\d{2}:\d{2}$/.test(prefs.limit || "") ? prefs.limit : "";
+    const hasWork = state.work && (state.work.start !== "10:00" || state.work.end !== "18:00" || state.work.limit);
+    const src = hasWork ? state.work : prefs;
+    RP.start.value = /^\d{2}:\d{2}$/.test(src.start || "") ? src.start : "10:00";
+    RP.end.value = /^\d{2}:\d{2}$/.test(src.end || "") ? src.end : "18:00";
+    RP.limit.value = /^\d{2}:\d{2}$/.test(src.limit || "") ? src.limit : "";
     $("#report-backdrop").hidden = false;
     $("#report-modal").hidden = false;
     buildReport();

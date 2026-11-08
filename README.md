@@ -20,6 +20,7 @@ Boshlangʻich nuqtani va borish kerak boʻlgan manzillarni kiritasiz. Platforma 
   - sana (`09.11.2026`), undan keyin `1-manzil`, `2-manzil` … bloklari: yoʻl masofasi, rulda necha daqiqa, yetib borish, ish va ketish vaqti;
   - ish kuni tugashiga ulgurmasak, manzilda tunab, ertasi kuni ish boshlanishida davom etiladi; yoʻlda kech qolsak, yoʻlda tunash koʻrsatiladi;
   - `.txt` yuklab olish, nusxalash, chop etish/PDF. Hisob tirbandlik va tushlikni hisobga olmaydi (`js/report.js`).
+- **Safarni boshlash** (natijadagi tugma, telefon uchun): jonli rejim. Telefon GPS'i xaritada joylashuvingizni koʻrsatadi; hozirgi manzilgacha qolgan masofa, vaqt va yetib borish soati hisoblanadi, rejaga nisbatan ortda/oldinda ekaningiz koʻrinadi. Manzilga ~150 m yaqinlashsangiz “yetib keldingiz” deb belgilanadi (yoki “Yetib keldim” tugmasi), ish taymeri boshlanadi; “Ishni tugatdim” keyingi manzilga oʻtkazadi (“Ortga” bilan bekor qilinadi). Ish oynasi, tunash va haydash chegarasi hisobot bilan bir xil qoidalarda qayta hisoblanadi (`js/live.js`). Ekran oʻchmasligi uchun “wake lock” ishlatiladi; sahifa qayta ochilsa, jonli safar davom etadi. Cheklov: brauzer fonda (ekran oʻchiq yoki boshqa ilovada) GPS'ni kuzata olmaydi. Ulashilgan (faqat koʻrish) havolada ham ishlaydi.
 - **Joy haqida panel** (manzilni bosing):
   - *Tepadan koʻrinish*: sunʼiy yoʻldosh tasviri, Google va Yandex sunʼiy yoʻldosh oynalari. Google Earth 3D, Street View va Yandex panoramasiga havolalar bor.
   - *Joy haqida*: joy turi, hudud, dengiz sathidan balandlik, 3 kunlik ob-havo va Vikipediya maʼlumoti. Hudud xarakteri ham baholanadi (gavjum shahar, tuman markazi, kichik aholi punkti yoki chekka hudud). Sayohatchi uchun maslahatlar beriladi, masalan: “yoqilgʻi shoxobchasi yoʻq”, “bankomat yoʻq”.
@@ -69,6 +70,7 @@ js/border.js      marshrut chegaradan chiqmasligini tekshirish va aylanma yoʻl 
 js/uz-border.js   Oʻzbekiston chegarasi (Natural Earth, ~1 km aniqlik)
 js/place.js       joy tavsifi va atrof tahlili
 js/report.js      kunma-kun safar hisoboti (jadval, matn, chop etish)
+js/live.js        jonli safar: GPS boʻyicha qolgan yoʻl, holat mashinasi, qayta hisoblash
 js/app.js         interfeys mantigʻi
 vendor/leaflet/   xarita kutubxonasi (Leaflet 1.9.4)
 ```

@@ -166,6 +166,7 @@
         <p class="savings" id="savings"></p>
         <ol class="itinerary" id="itinerary"></ol>
         <div class="export">
+          <button class="btn sm live-btn" id="btn-live" type="button">Safarni boshlash</button>
           <a class="btn sm" id="link-google" target="_blank" rel="noopener">Google Maps’da ochish</a>
           <a class="btn sm" id="link-yandex" target="_blank" rel="noopener">Yandex Kartada ochish</a>
           <button class="btn ghost sm" id="btn-copy" type="button">Rejani nusxalash</button>
@@ -185,6 +186,25 @@
       <div class="map-busy" id="map-busy" hidden><span class="spinner"></span><span id="busy-text">Hisoblanmoqda…</span></div>
     </section>
   </main>
+
+  <!-- Jonli safar -->
+  <section class="live" id="live" hidden aria-label="Jonli safar">
+    <header class="live-head">
+      <span class="live-dot" aria-hidden="true"></span>
+      <b id="lv-title">Safar davom etmoqda</b>
+      <button class="icon-btn" id="lv-min" type="button" aria-label="Kichraytirish / kattalashtirish" aria-expanded="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <button class="btn ghost sm" id="lv-stop" type="button">Toʻxtatish</button>
+    </header>
+    <div class="live-body" id="lv-body">
+      <div class="lv-now" id="lv-now"></div>
+      <div class="lv-stats" id="lv-stats"></div>
+      <div class="lv-actions" id="lv-actions"></div>
+      <ol class="lv-next" id="lv-next"></ol>
+      <div class="lv-gps" id="lv-gps"></div>
+    </div>
+  </section>
 
   <!-- Manzilni tahrirlash -->
   <div class="drawer-backdrop" id="edit-backdrop" hidden></div>
@@ -312,6 +332,7 @@
   <script src="js/border.js"></script>
   <script src="js/place.js"></script>
   <script src="js/report.js"></script>
+  <script src="js/live.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
