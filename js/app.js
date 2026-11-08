@@ -11,6 +11,9 @@
   const HIST_KEY = "yolnoma.history.v1";   // saqlangan marshrut rejalari (Tarix)
   const PLAN_KEY = "yolnoma.plan.v1";      // hozirgi reja Tarixdagi qaysi yozuvga bogʻlangan
   const HIST_MAX = 50;
+  const DEL_KEY = "yolnoma.history.del.v1";   // oʻchirilgan yozuvlar (serverga yetkazilguncha)
+  const PLAN_AT_KEY = "yolnoma.plan.at.v1";    // hozirgi reja tanlangan vaqt (qurilmalar oʻrtasida eng soʻnggisi gʻolib)
+  const SYNC_EMAIL_KEY = "yolnoma.sync.email";
 
   /* ---------------- Holat ---------------- */
 
@@ -41,6 +44,7 @@
     work: { start: "10:00", end: "18:00", limit: "" },  // ish oynasi (hisobot va jonli rejim uchun)
   };
   let result = null;          // hisoblangan marshrut
+  const syncSt = { busy: false, applying: false, again: false, timer: null, last: 0, err: "", sent: "" };
   let planId = null;          // hozirgi reja bogʻlangan Tarix yozuvi (oʻzgarishlar unga avtomatik yoziladi)
   let readonly = false;       // ulashilgan havola: faqat koʻrish (tahrirlash va saqlash yoʻq)
   let pickMode = null;        // "start" | "stop" | null
@@ -115,6 +119,7 @@
   function save() {
     if (readonly) return;   // ulashilgan safar koʻruvchining oʻz saqlangan safarini bosib ketmasligi kerak
     try { localStorage.setItem(STORE_KEY, JSON.stringify(serialize())); } catch (_) { /* noop */ }
+    ensureBound();
     histSync();
   }
 
@@ -575,18 +580,22 @@
     $("#btn-solve").disabled = on;
   }
 
+  let solveSeq = 0;
   async function solve() {
     if (!state.start) { toast("Avval boshlangʻich nuqtani kiriting.", "warn"); $("#start-input").focus(); return; }
     if (!state.stops.length) { toast("Kamida bitta manzil qoʻshing.", "warn"); $("#stop-input").focus(); return; }
     if (state.stops.length > 60) { toast("Bir safarda koʻpi bilan 60 ta manzil hisoblanadi.", "warn"); return; }
     setPick(null);
+    const runId = ++solveSeq;      // hisoblash davomida reja almashtirilsa (boshqa qurilmadan yoki Tarixdan), eskisi tashlab yuboriladi
     const pins = activePins();
     busy(true, "Yoʻl masofalari olinmoqda…");
     try {
       const pts = [state.start].concat(state.stops);
       const mx0 = await API.matrix(pts);
+      if (runId !== solveSeq) return;
       busy(true, "Eng qulay tartib hisoblanmoqda…");
       await new Promise((r) => setTimeout(r, 20));
+      if (runId !== solveSeq) return;
       const inputOrder = state.stops.map((_, i) => i + 1);
 
       let mx = mx0, sol, rt, seq, legs, via = [], border = null, plan = null;
@@ -597,6 +606,7 @@
             pts, mx: mx0, metric: state.metric, roundTrip: state.roundTrip, pins,
             route: API.route, matrix: API.matrix, tsp: TSP, progress: (t) => busy(true, t),
           });
+          if (runId !== solveSeq) return;
         } catch (e) {
           console.warn("Chegara tekshiruvi ishlamadi, oddiy hisobga oʻtildi:", e);
         }
@@ -611,6 +621,7 @@
         seq = [0].concat(sol.order, state.roundTrip ? [0] : []);
         busy(true, "Marshrut chizilmoqda…");
         rt = await API.route(seq.map((k) => pts[k]));
+        if (runId !== solveSeq) return;
         legs = rt ? rt.legs : null;
       }
       const cost = state.metric === "duration" ? mx.durations : mx.distances;
@@ -662,7 +673,7 @@
       console.error(e);
       toast("Hisoblashda xatolik: " + e.message, "warn");
     } finally {
-      busy(false);
+      if (runId === solveSeq) busy(false);
     }
   }
   $("#btn-solve").onclick = solve;
@@ -1924,10 +1935,16 @@
     try { localStorage.setItem(HIST_KEY, JSON.stringify(list.slice(0, HIST_MAX))); return true; }
     catch (_) { toast("Tarixni saqlab boʻlmadi (brauzer xotirasi toʻla).", "warn"); return false; }
   }
-  function setPlanId(id) {
+  function setPlanId(id, at) {
     planId = id || null;
-    try { if (planId) localStorage.setItem(PLAN_KEY, planId); else localStorage.removeItem(PLAN_KEY); } catch (_) { /* noop */ }
+    try {
+      if (planId) localStorage.setItem(PLAN_KEY, planId); else localStorage.removeItem(PLAN_KEY);
+      localStorage.setItem(PLAN_AT_KEY, String(at || Date.now()));
+    } catch (_) { /* noop */ }
+    if (!at) syncSoon();
   }
+  const tombRead = () => { try { return JSON.parse(localStorage.getItem(DEL_KEY) || "{}") || {}; } catch (_) { return {}; } };
+  const tombWrite = (o) => { try { localStorage.setItem(DEL_KEY, JSON.stringify(o)); } catch (_) { /* noop */ } };
   const planHasContent = () => !state.sample && !!(state.start || state.stops.length);
   const histNewId = () => "h" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
@@ -1950,18 +1967,23 @@
     const dist = result && !result.stale ? Math.round(result.distance) : (e ? e.dist : 0);
     const dur = result && !result.stale ? Math.round(result.duration) : (e ? e.dur : 0);
     if (e) {
-      if (JSON.stringify(e.data) === JSON.stringify(data) && e.dist === dist) return e;   // oʻzgarish yoʻq
+      if (JSON.stringify(e.data) === JSON.stringify(data)) {
+        // reja oʻzgarmagan: faqat hisoblangan masofa yangilanadi (yangilanish vaqti va sinxron tegilmaydi)
+        if (e.dist !== dist || e.dur !== dur) { e.dist = dist; e.dur = dur; histWrite(list); }
+        return e;
+      }
       e.data = data; e.dist = dist; e.dur = dur; e.updatedAt = now;
     } else {
       e = { id, name: (extra && extra.name) || histAutoName(data), createdAt: now, updatedAt: now, data, dist, dur };
       list.push(e);
     }
     histWrite(list);
+    syncSoon();
     return e;
   }
   /** Bogʻlangan reja oʻzgarsa, Tarixdagi nusxa ham yangilanadi. */
   function histSync() {
-    if (readonly || !planId) return;
+    if (readonly || !planId || syncSt.applying) return;
     if (!planHasContent()) return;
     if (!histRead().some((x) => x.id === planId)) return;
     histUpsert(planId, serialize());
@@ -2013,14 +2035,16 @@
     if (!e) return;
     if (!window.confirm("«" + e.name + "» Tarixdan oʻchirilsinmi?")) return;
     histWrite(histRead().filter((x) => x.id !== id));
+    const tomb = tombRead(); tomb[id] = Date.now(); tombWrite(tomb);
     if (planId === id) setPlanId(null);
     renderHist();
+    syncSoon();
   }
   function histRename(id, name) {
     const list = histRead(), e = list.find((x) => x.id === id);
     if (!e) return;
     const n = String(name || "").trim().slice(0, 60);
-    if (n) { e.name = n; histWrite(list); }
+    if (n && n !== e.name) { e.name = n; e.updatedAt = Date.now(); histWrite(list); syncSoon(); }
   }
 
   function renderHist() {
@@ -2047,7 +2071,7 @@
   }
 
   function openHist() {
-    renderHist();
+    renderHist(); renderSync();
     $("#hist-backdrop").hidden = false; $("#hist-modal").hidden = false;
     $("#hist-close").focus();
   }
@@ -2095,10 +2119,151 @@
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); renderHist(); }
   });
 
+
+  /* ---------------- Server bilan sinxron (Supabase) ---------------- */
+
+  /** Kirilgan boʻlsa, saqlanmagan joriy rejaga ham Tarix yozuvi ochiladi (hech narsa qurilmada qolib ketmasligi uchun). */
+  function ensureBound() {
+    if (readonly || planId || syncSt.applying || !Sync.signedIn() || !planHasContent()) return;
+    const id = histNewId();
+    histUpsert(id, serialize());
+    planId = id;
+    try { localStorage.setItem(PLAN_KEY, id); localStorage.setItem(PLAN_AT_KEY, String(Date.now())); } catch (_) { /* noop */ }
+  }
+
+  function syncSoon() {
+    if (readonly || !Sync.signedIn()) return;
+    clearTimeout(syncSt.timer);
+    syncSt.timer = setTimeout(syncNow, 1500);
+  }
+
+  /** Boshqa qurilmada tanlangan/oʻzgargan rejani shu qurilmada joriy qiladi. */
+  function applyEntry(e, at, msg) {
+    syncSt.applying = true;
+    try {
+      load(e.data); state.sample = false;
+      setPlanId(e.id, at || Date.now());
+      result = null; details.clear(); routeLayer.clearLayers(); poiLayer.clearLayers();
+      closeDrawer();
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(serialize())); } catch (_) { /* noop */ }
+      renderAll(); fitAll();
+    } finally { syncSt.applying = false; }
+    if (state.start && state.stops.length) solve();
+    if (msg) toast(msg);
+  }
+
+  async function syncNow() {
+    if (readonly || !Sync.signedIn()) return;
+    if (syncSt.busy) { syncSt.again = true; return; }
+    syncSt.busy = true; syncSt.err = ""; renderSync();
+    try {
+      ensureBound();
+      const [remote, rstate] = await Promise.all([Sync.pullPlans(), Sync.pullState()]);
+      const tomb = tombRead();
+      let local = histRead();
+      const push = [];
+      let reload = null;          // joriy reja serverda yangiroq boʻlsa — qayta yuklanadi
+      const rIds = new Set(remote.map((r) => r.id));
+      for (const r of remote) {
+        const l = local.find((x) => x.id === r.id), t = tomb[r.id];
+        if (t) {
+          if (!r.deleted && r.updatedAt > t) { delete tomb[r.id]; }                     // oʻchirilgandan keyin boshqa qurilmada tahrirlangan — qaytaramiz
+          else {
+            if (!r.deleted) push.push({ id: r.id, name: r.name, data: r.data, dist: r.dist, dur: r.dur, createdAt: r.createdAt, updatedAt: t, deleted: true });
+            else delete tomb[r.id];
+            continue;
+          }
+        }
+        if (r.deleted) {
+          if (l && l.updatedAt <= r.updatedAt) { local = local.filter((x) => x !== l); if (planId === r.id) { planId = null; try { localStorage.removeItem(PLAN_KEY); } catch (_) { /* noop */ } } }
+          else if (l) push.push(l);
+          continue;
+        }
+        if (!l) local.push({ id: r.id, name: r.name, data: r.data, dist: r.dist, dur: r.dur, createdAt: r.createdAt, updatedAt: r.updatedAt });
+        else if (r.updatedAt > l.updatedAt) {
+          const changed = JSON.stringify(l.data) !== JSON.stringify(r.data);
+          Object.assign(l, { name: r.name, data: r.data, dist: r.dist, dur: r.dur, createdAt: r.createdAt, updatedAt: r.updatedAt });
+          if (l.id === planId && changed) reload = l;
+        } else if (l.updatedAt > r.updatedAt) push.push(l);
+      }
+      for (const l of local) {
+        if (rIds.has(l.id)) continue;
+        if (tomb[l.id]) { delete tomb[l.id]; continue; }                               // serverda hech boʻlmagan va oʻchirilgan
+        push.push(l);
+      }
+      for (const id of Object.keys(tomb)) if (!rIds.has(id)) delete tomb[id];
+      histWrite(local); tombWrite(tomb);
+      if (push.length) await Sync.pushPlans(push);
+
+      // hozirgi reja: eng soʻnggi tanlagan qurilma gʻolib
+      const at = Number(localStorage.getItem(PLAN_AT_KEY)) || 0;
+      const target = rstate && rstate.current && histRead().find((x) => x.id === rstate.current);
+      const busyLive = lv && lv.on;
+      if (target && rstate.at > at && rstate.current !== planId && !busyLive) {
+        applyEntry(target, rstate.at, "Boshqa qurilmadagi reja ochildi: «" + target.name + "»");
+      } else if (reload && !busyLive) {
+        applyEntry(reload, at, "Reja boshqa qurilmada oʻzgargan — yangilandi.");
+      } else if (planId && (!rstate || rstate.current !== planId) && at >= (rstate ? rstate.at : 0)) {
+        await Sync.pushState(planId, at || Date.now());
+      }
+      syncSt.last = Date.now();
+    } catch (e) {
+      if (e && e.auth) { syncSt.err = "Kirish muddati tugadi — qayta kiring."; }
+      else syncSt.err = "Sinxron boʻlmadi: " + (e && e.message ? e.message : e) + " (internet qaytgach avtomatik urinadi)";
+    } finally {
+      syncSt.busy = false;
+      renderSync(); if (!$("#hist-modal").hidden) renderHist();
+      if (syncSt.again) { syncSt.again = false; syncSoon(); }
+    }
+  }
+
+  function renderSync() {
+    const box = $("#hs-sync");
+    if (!box) return;
+    if (!Sync.enabled() || readonly) { box.hidden = true; return; }
+    box.hidden = false;
+    const hm = (t) => { const d = new Date(t), z = (n) => String(n).padStart(2, "0"); return z(d.getHours()) + ":" + z(d.getMinutes()); };
+    if (Sync.signedIn()) {
+      const u = Sync.user() || {};
+      box.innerHTML = '<span><b>✓ ' + esc(u.email || "Kirilgan") + "</b><br>" + (syncSt.busy ? "Sinxronlanmoqda…" : syncSt.err ? esc(syncSt.err) : "Rejalar barcha qurilmalarda bir xil" + (syncSt.last ? " · yangilandi " + hm(syncSt.last) : "")) + '</span>' +
+        '<button class="btn ghost sm" type="button" data-sy="now">Yangilash</button><button class="btn ghost sm" type="button" data-sy="out">Chiqish</button>';
+    } else {
+      let saved = ""; try { saved = localStorage.getItem(SYNC_EMAIL_KEY) || ""; } catch (_) { /* noop */ }
+      box.innerHTML = '<span>Rejalar telefon va kompyuterda bir xil boʻlishi uchun kiring (parolsiz — emailga havola keladi).' + (syncSt.sent ? "<br><b>" + esc(syncSt.sent) + "</b>" : "") + (syncSt.err ? "<br>" + esc(syncSt.err) : "") + '</span>' +
+        '<div class="sy-form"><input type="email" id="sy-email" inputmode="email" autocomplete="email" placeholder="email manzilingiz" value="' + esc(saved) + '"><button class="btn sm" type="button" data-sy="send">Havola yuborish</button></div>';
+    }
+  }
+  $("#hs-sync").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-sy]");
+    if (!b) return;
+    const a = b.dataset.sy;
+    if (a === "send") {
+      const em = ($("#sy-email").value || "").trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { syncSt.err = "Email manzilni toʻgʻri kiriting."; syncSt.sent = ""; renderSync(); return; }
+      try { localStorage.setItem(SYNC_EMAIL_KEY, em); } catch (_) { /* noop */ }
+      b.disabled = true; syncSt.err = ""; syncSt.sent = "";
+      try { await Sync.sendLink(em); syncSt.sent = "Havola " + em + " ga yuborildi. Emailni shu qurilmada ochib, havolani bosing."; }
+      catch (err) { syncSt.err = "Yuborib boʻlmadi: " + err.message; }
+      renderSync();
+    } else if (a === "now") syncNow();
+    else if (a === "out") {
+      if (!window.confirm("Chiqilsinmi? Rejalar shu qurilmada qoladi, lekin boshqa qurilmalar bilan sinxron toʻxtaydi.")) return;
+      await Sync.signOut(); syncSt.err = ""; syncSt.sent = ""; renderSync(); toast("Chiqildi.");
+    }
+  });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && Sync.signedIn() && Date.now() - syncSt.last > 10000) syncNow(); });
+  setInterval(() => { if (document.visibilityState === "visible" && Sync.signedIn() && !(lv && lv.on) && Date.now() - syncSt.last > 55000) syncNow(); }, 30000);
+
   /* ---------------- Boshlash ---------------- */
 
   function boot() {
     let loaded = false;
+    // Emaildagi kirish havolasi (#access_token=…): sessiyani saqlab, manzilni tozalaymiz
+    const login = Sync.consumeHash();
+    if (login) {
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (_) { /* noop */ }
+      if (login.error) { toast("Kirib boʻlmadi: " + login.error, "warn"); } else toast("Kirdingiz. Rejalar sinxronlanmoqda…");
+    }
     // Ulashilgan havola (#view=… yoki eski #trip=…) faqat koʻrish rejimida ochiladi: tahrirlash va saqlash yoʻq
     const m = location.hash.match(/(?:view|trip)=([A-Za-z0-9_-]+)/);
     if (m) {
@@ -2132,6 +2297,8 @@
     renderAll();
     fitAll();
     if (state.start && state.stops.length) solve();
+    renderSync();
+    if (Sync.signedIn() && !readonly) syncNow();
   }
 
   boot();
