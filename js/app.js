@@ -37,6 +37,7 @@
     sample: false,
   };
   let result = null;          // hisoblangan marshrut
+  let readonly = false;       // ulashilgan havola: faqat koʻrish (tahrirlash va saqlash yoʻq)
   let pickMode = null;        // "start" | "stop" | null
   const details = new Map();  // id -> {info, weather, wiki, nearby:{radius:data}}
 
@@ -82,12 +83,14 @@
     };
   }
 
-  function serialize() {
+  function serialize(forShare) {
+    // Ulashishda har manzilning hisoblangan tashrif oʻrni "pin" qilib yoziladi: koʻruvchida tartib aynan shunday chiqadi
+    const visit = forShare && result && !result.stale ? new Map(result.order.map((id, i) => [id, i + 1])) : null;
     const slim = (p) => p && ({ name: p.name, address: p.address, lat: +p.lat.toFixed(6), lon: +p.lon.toFixed(6),
-      category: p.category, type: p.type, region: p.region, note: p.note || "", link: p.link || "", stay: p.stay === undefined ? null : p.stay, pin: p.pin || 0 });
+      category: p.category, type: p.type, region: p.region, note: p.note || "", link: p.link || "", stay: p.stay === undefined ? null : p.stay, pin: visit && visit.has(p.id) ? visit.get(p.id) : (forShare ? 0 : p.pin || 0) });
     return {
       start: slim(state.start), stops: state.stops.map(slim), metric: state.metric, roundTrip: state.roundTrip,
-      depart: state.depart, stay: state.stay, fuelRate: state.fuelRate, fuelPrice: state.fuelPrice, sample: state.sample,
+      depart: state.depart, stay: state.stay, fuelRate: state.fuelRate, fuelPrice: state.fuelPrice, sample: forShare ? false : state.sample,
     };
   }
 
@@ -100,6 +103,7 @@
   }
 
   function save() {
+    if (readonly) return;   // ulashilgan safar koʻruvchining oʻz saqlangan safarini bosib ketmasligi kerak
     try { localStorage.setItem(STORE_KEY, JSON.stringify(serialize())); } catch (_) { /* noop */ }
   }
 
@@ -184,10 +188,10 @@
       '<div class="pc-text"><b>' + esc(s.name) + '</b><span>' + esc(s.address || Geo.fmtCoord(s.lat, s.lon)) + "</span></div>" +
       '<div class="pc-actions">' +
       '<button class="icon-btn" type="button" data-act="info" title="Joy haqida"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></button>' +
-      '<button class="icon-btn" type="button" data-act="remove" title="Oʻchirish"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>' +
+      (readonly ? "" : '<button class="icon-btn" type="button" data-act="remove" title="Oʻchirish"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>') +
       "</div></div>";
     $('[data-act="info"]', el).onclick = () => openDrawer(s.id);
-    $('[data-act="remove"]', el).onclick = () => { state.start = null; changed(); };
+    if (!readonly) $('[data-act="remove"]', el).onclick = () => { state.start = null; changed(); };
   }
 
   /** Foydalanuvchi izohi uchun kichik belgi (HTML). */
@@ -200,6 +204,14 @@
     $("#stops-empty").hidden = state.stops.length > 0;
     list.innerHTML = state.stops.map((s, i) => {
       const visit = solved ? result.order.indexOf(s.id) + 1 : 0;
+      if (readonly) {
+        return '<li class="place-card" data-id="' + s.id + '">' +
+          '<span class="badge ' + (solved ? "" : "pending") + '">' + (solved ? visit : i + 1) + "</span>" +
+          '<div class="pc-text">' + noteTag(s.note) + "<b>" + esc(s.name) + "</b><span>" + esc(s.address || Geo.fmtCoord(s.lat, s.lon)) + "</span>" + linkTag(s.link, "link-chip") + "</div>" +
+          '<div class="pc-actions">' + (stayOf(s) ? '<span class="ro-stay">' + hoursStr(stayOf(s)) + " soat</span>" : "") +
+          '<button class="icon-btn" type="button" data-act="info" title="Joy haqida"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></button>' +
+          "</div></li>";
+      }
       return '<li class="place-card' + (s.pin ? " pinned" : "") + '" data-id="' + s.id + '">' +
         '<span class="badge ' + (solved ? "" : "pending") + '" title="' + (solved ? "Tashrif tartibi" : "Kiritilgan tartib") + '">' + (solved ? visit : i + 1) + "</span>" +
         '<div class="pc-text">' + noteTag(s.note) + "<b>" + esc(s.name) + "</b><span>" + esc(s.address || Geo.fmtCoord(s.lat, s.lon)) + "</span>" + linkTag(s.link, "link-chip") + "</div>" +
@@ -219,6 +231,7 @@
   /* Tashrif oʻrnini qoʻlda belgilash: raqam yozilsa, manzil shu oʻringa qotiriladi va marshrut qayta hisoblanadi */
   /* Shu manzilda necha soat turish: marshrut tartibiga taʼsir qilmaydi, faqat vaqt jadvali oʻzgaradi */
   $("#stop-list").addEventListener("change", (e) => {
+    if (readonly) return;
     const si = e.target.closest(".stay-input");
     if (si) {
       const li = si.closest("li[data-id]"), s = li && stopById(li.dataset.id);
@@ -259,6 +272,7 @@
     const li = e.target.closest("li[data-id]");
     if (!li) return;
     const id = li.dataset.id;
+    if (readonly && btn && btn.dataset.act !== "info") return;
     if (btn && btn.dataset.act === "remove") {
       state.stops = state.stops.filter((s) => s.id !== id);
       changed();
@@ -599,7 +613,7 @@
       // Belgilangan oʻrinlar marshrutni qanchaga uzaytirganini koʻrsatish uchun: erkin (belgilarsiz) eng yaxshi tartib
       const pinned = Object.keys(pins).length;
       let freeDist = optDistM, freeDur = optDurM;
-      if (pinned) {
+      if (pinned && !readonly) {   // faqat koʻrishda taqqoslash kerak emas
         const freeSol = TSP.solve(cost, { roundTrip: state.roundTrip });
         freeDist = TSP.pathCost(mx.distances, freeSol.order, state.roundTrip);
         freeDur = TSP.pathCost(mx.durations, freeSol.order, state.roundTrip);
@@ -723,7 +737,7 @@
       t += leg.duration;
       rows.push(legRow(leg));
       rows.push(itRow({ badge: String(i + 1), cls: "", name: s.name, note: s.note, link: s.link,
-        sub: "Yetib borish " + clock(state.depart, t) + (s.pin ? " · oʻrni belgilangan" : "") + (s.stay !== null ? " · " + hoursStr(s.stay) + " soat" : "") + (stayOf(s) ? " · ketish " + clock(state.depart, t + stayOf(s) * 60) : ""),
+        sub: "Yetib borish " + clock(state.depart, t) + (s.pin && !readonly ? " · oʻrni belgilangan" : "") + (s.stay !== null ? " · " + hoursStr(s.stay) + " soat" : "") + (stayOf(s) ? " · ketish " + clock(state.depart, t + stayOf(s) * 60) : ""),
         id: s.id, region: s.region }));
       t += stayOf(s) * 60;
     });
@@ -830,8 +844,8 @@
   }
 
   $("#btn-share").onclick = () => {
-    const url = location.href.split("#")[0] + "#trip=" + b64encode(JSON.stringify(serialize()));
-    copyText(url, "Safar havolasi nusxalandi — uni doʻstingizga yuboring.");
+    const url = location.href.split("#")[0] + "#view=" + b64encode(JSON.stringify(serialize(true)));
+    copyText(url, "Havola nusxalandi — ochgan kishi safarni faqat koʻra oladi, oʻzgartira olmaydi.");
   };
 
   $("#btn-clear").onclick = () => clearAll();
@@ -1099,7 +1113,7 @@
 
   function openEdit(id) {
     const s = stopById(id);
-    if (!s) return;
+    if (!s || readonly) return;
     ED.id = id; ED.pick = null;
     edEl("name").textContent = s.name;
     edEl("address").textContent = s.address || "";
@@ -1216,6 +1230,7 @@
   }
 
   function openReport() {
+    if (readonly) return;
     if (!result || result.stale) { toast("Avval marshrutni hisoblang."); return; }
     let prefs = {};
     try { prefs = JSON.parse(localStorage.getItem(REPORT_KEY) || "{}") || {}; } catch (_) { /* noop */ }
@@ -1260,10 +1275,17 @@
 
   function boot() {
     let loaded = false;
-    const m = location.hash.match(/trip=([A-Za-z0-9_-]+)/);
+    // Ulashilgan havola (#view=… yoki eski #trip=…) faqat koʻrish rejimida ochiladi: tahrirlash va saqlash yoʻq
+    const m = location.hash.match(/(?:view|trip)=([A-Za-z0-9_-]+)/);
     if (m) {
-      try { load(JSON.parse(b64decode(m[1]))); state.sample = false; loaded = true; save(); history.replaceState(null, "", location.pathname + location.search); }
-      catch (e) { toast("Havoladagi safar maʼlumotini oʻqib boʻlmadi."); }
+      try {
+        const data = JSON.parse(b64decode(m[1]));
+        readonly = true;
+        load(data); state.sample = false; loaded = true;
+        document.body.classList.add("readonly");
+        $("#ro-note").hidden = false;
+        $("#ro-own").href = location.pathname + location.search;
+      } catch (e) { readonly = false; toast("Havoladagi safar maʼlumotini oʻqib boʻlmadi."); }
     }
     if (!loaded) {
       try {

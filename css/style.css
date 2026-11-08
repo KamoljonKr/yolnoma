@@ -464,3 +464,9 @@ code, .mono { font-family: var(--f-mono); font-size: 12.5px; }
 .ed-new { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; border-color: var(--teal); background: var(--accent-soft); }
 .ed-new > div { display: flex; flex-direction: column; min-width: 0; }
 .modal .field > span { font-size: 12.5px; }
+
+/* ---------- Faqat koʻrish rejimi (ulashilgan havola) ---------- */
+body.readonly .edit-only, body.readonly #savings, body.readonly #stops-empty { display: none !important; }
+.ro-note { padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--ink); font-size: 13.5px; line-height: 1.45; }
+.ro-note a { margin-left: 4px; white-space: nowrap; }
+.ro-stay { margin-right: auto; padding-left: 4px; font: 500 12.5px var(--f-mono); color: var(--teal); }
