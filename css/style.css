@@ -78,6 +78,25 @@ code, .mono { font-family: var(--f-mono); font-size: 12.5px; }
 .brand-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .top-actions { display: flex; gap: 6px; }
 
+/* ---------- Tarix ---------- */
+.hs-cur { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13.5px; }
+.hs-cur:empty { display: none; }
+.hs-cur span { flex: 1 1 200px; }
+.hs-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.hs-item { display: flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 4px 4px 4px 0; }
+.hs-item.cur { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.hs-main { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 8px 12px; cursor: pointer; color: inherit; font: inherit; display: flex; flex-direction: column; gap: 2px; }
+.hs-main:hover b { color: var(--accent); }
+.hs-main b { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
+.hs-main .hs-route { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hs-main .hs-meta { font-size: 12px; color: var(--muted); }
+.hs-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 600; vertical-align: 2px; }
+.hs-item .icon-btn { flex: none; }
+.hs-edit { flex: 1; display: flex; gap: 6px; padding: 4px 8px; }
+.hs-edit input { flex: 1; min-width: 0; }
+.readonly .hs-main { cursor: default; }
+.hs-empty { font-size: 13.5px; margin: 0; }
+
 /* ---------- Layout ---------- */
 .layout {
   display: grid;
@@ -149,11 +168,11 @@ code, .mono { font-family: var(--f-mono); font-size: 12.5px; }
 
 /* ---------- Search ---------- */
 .search-field { position: relative; }
-.search-field input, .bulk textarea, .field input, .around-ctrl select {
+.search-field input, .bulk textarea, .field input, .around-ctrl select, .hs-edit input {
   width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
   background: var(--surface-2); color: var(--ink); font: inherit; font-size: 14px;
 }
-.search-field input:focus, .bulk textarea:focus, .field input:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search-field input:focus, .bulk textarea:focus, .field input:focus, .hs-edit input:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
 .suggest {
   position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 1200;
   list-style: none; margin: 0; padding: 4px; max-height: 320px; overflow-y: auto;

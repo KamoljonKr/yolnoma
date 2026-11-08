@@ -8,6 +8,9 @@
   const esc = Place.esc;
   const CONFIG = window.YOLNOMA_CONFIG || {};
   const STORE_KEY = "yolnoma.trip.v1";
+  const HIST_KEY = "yolnoma.history.v1";   // saqlangan marshrut rejalari (Tarix)
+  const PLAN_KEY = "yolnoma.plan.v1";      // hozirgi reja Tarixdagi qaysi yozuvga bogʻlangan
+  const HIST_MAX = 50;
 
   /* ---------------- Holat ---------------- */
 
@@ -38,6 +41,7 @@
     work: { start: "10:00", end: "18:00", limit: "" },  // ish oynasi (hisobot va jonli rejim uchun)
   };
   let result = null;          // hisoblangan marshrut
+  let planId = null;          // hozirgi reja bogʻlangan Tarix yozuvi (oʻzgarishlar unga avtomatik yoziladi)
   let readonly = false;       // ulashilgan havola: faqat koʻrish (tahrirlash va saqlash yoʻq)
   let pickMode = null;        // "start" | "stop" | null
   const details = new Map();  // id -> {info, weather, wiki, nearby:{radius:data}}
@@ -111,6 +115,7 @@
   function save() {
     if (readonly) return;   // ulashilgan safar koʻruvchining oʻz saqlangan safarini bosib ketmasligi kerak
     try { localStorage.setItem(STORE_KEY, JSON.stringify(serialize())); } catch (_) { /* noop */ }
+    histSync();
   }
 
   function b64encode(str) {
@@ -651,6 +656,7 @@
       drawRoute();
       fitAll();
       tryResumeLive();
+      histSync();
       if (window.matchMedia("(max-width: 900px)").matches) $("#result").scrollIntoView({ behavior: "smooth" });
     } catch (e) {
       console.error(e);
@@ -860,14 +866,22 @@
   };
 
   $("#btn-clear").onclick = () => clearAll();
+  $("#btn-new").onclick = () => clearAll({ fresh: true });
   $("#btn-sample-clear").onclick = () => clearAll();
-  function clearAll() {
+  /** Joriy rejani boʻshatadi (Tarixga saqlab qoʻyib): "Tozalash" ham, "+ Yangi reja" ham shu. */
+  function clearAll(opts) {
+    if (readonly) return;
+    if (lv && lv.on) stopLive("Yangi reja — jonli rejim toʻxtatildi.");
+    const archived = archiveCurrent();
+    setPlanId(null);
     state.start = null; state.stops = []; state.sample = false; result = null;
     details.clear(); routeLayer.clearLayers(); poiLayer.clearLayers();
     closeDrawer();
     save(); renderAll();
     map.setView([41.2, 64.6], 6);
     $("#start-input").focus();
+    if (archived) toast("Oldingi reja Tarixga saqlandi.");
+    else if (opts && opts.fresh) toast("Yangi reja boshlandi.");
   }
 
   /* ---------------- Joy haqida panel ---------------- */
@@ -1896,6 +1910,191 @@
     f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (_) { toast("Chop etib boʻlmadi."); } setTimeout(() => f.remove(), 60000); };
   };
 
+
+  /* ---------------- Tarix (saqlangan marshrut rejalari) ---------------- */
+
+  function histRead() {
+    try {
+      const a = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
+      return Array.isArray(a) ? a.filter((e) => e && e.id && e.data && typeof e.data === "object") : [];
+    } catch (_) { return []; }
+  }
+  function histWrite(list) {
+    list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    try { localStorage.setItem(HIST_KEY, JSON.stringify(list.slice(0, HIST_MAX))); return true; }
+    catch (_) { toast("Tarixni saqlab boʻlmadi (brauzer xotirasi toʻla).", "warn"); return false; }
+  }
+  function setPlanId(id) {
+    planId = id || null;
+    try { if (planId) localStorage.setItem(PLAN_KEY, planId); else localStorage.removeItem(PLAN_KEY); } catch (_) { /* noop */ }
+  }
+  const planHasContent = () => !state.sample && !!(state.start || state.stops.length);
+  const histNewId = () => "h" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  function histAutoName(d) {
+    const s = d.start && d.start.name ? d.start.name : "Reja";
+    const n = (d.stops || []).length;
+    const last = n === 1 ? d.stops[0].name : n > 1 ? n + " ta manzil" : "";
+    return (last ? s + " → " + last : s).slice(0, 60);
+  }
+  function histFmtDate(ts) {
+    const d = new Date(ts), z = (n) => String(n).padStart(2, "0");
+    return z(d.getDate()) + "." + z(d.getMonth() + 1) + "." + d.getFullYear() + " " + z(d.getHours()) + ":" + z(d.getMinutes());
+  }
+
+  /** Joriy rejani Tarix yozuviga yozadi (yozuv yoʻq boʻlsa yaratadi). Yozuvni qaytaradi. */
+  function histUpsert(id, data, extra) {
+    const list = histRead();
+    const now = Date.now();
+    let e = list.find((x) => x.id === id);
+    const dist = result && !result.stale ? Math.round(result.distance) : (e ? e.dist : 0);
+    const dur = result && !result.stale ? Math.round(result.duration) : (e ? e.dur : 0);
+    if (e) {
+      if (JSON.stringify(e.data) === JSON.stringify(data) && e.dist === dist) return e;   // oʻzgarish yoʻq
+      e.data = data; e.dist = dist; e.dur = dur; e.updatedAt = now;
+    } else {
+      e = { id, name: (extra && extra.name) || histAutoName(data), createdAt: now, updatedAt: now, data, dist, dur };
+      list.push(e);
+    }
+    histWrite(list);
+    return e;
+  }
+  /** Bogʻlangan reja oʻzgarsa, Tarixdagi nusxa ham yangilanadi. */
+  function histSync() {
+    if (readonly || !planId) return;
+    if (!planHasContent()) return;
+    if (!histRead().some((x) => x.id === planId)) return;
+    histUpsert(planId, serialize());
+  }
+  /** Joriy reja Tarixda yoʻq boʻlsa, saqlab qoʻyadi. true — yangi yozuv yaratildi. */
+  function archiveCurrent() {
+    if (readonly || !planHasContent()) return false;
+    if (planId && histRead().some((x) => x.id === planId)) { histSync(); return false; }
+    histUpsert(histNewId(), serialize());
+    return true;
+  }
+
+  function histSaveCurrent() {
+    if (readonly) {
+      // Ulashilgan safar: koʻruvchi oʻz Tarixiga nusxa qilib saqlaydi (bir xil boʻlsa takrorlanmaydi)
+      const d = serialize(), sig = JSON.stringify(d);
+      if (histRead().some((x) => JSON.stringify(x.data) === sig)) { toast("Bu safar Tarixda allaqachon bor."); return; }
+      histUpsert(histNewId(), d);
+      toast("Safar Tarixga saqlandi. Tahrirlash uchun “Oʻz safarimni boshlash”ni bosing.");
+    } else {
+      if (!planHasContent()) { toast("Saqlash uchun avval reja tuzing.", "warn"); return; }
+      if (planId && histRead().some((x) => x.id === planId)) { toast("Reja Tarixda saqlangan."); return; }
+      const id = histNewId();
+      histUpsert(id, serialize());
+      setPlanId(id);
+      toast("Reja Tarixga saqlandi.");
+    }
+    renderHist();
+  }
+
+  function histOpen(id) {
+    if (readonly) return;
+    const e = histRead().find((x) => x.id === id);
+    if (!e) return;
+    if (id === planId) { closeHist(); return; }
+    if (lv && lv.on) stopLive("Reja almashtirildi — jonli rejim toʻxtatildi.");
+    const archived = archiveCurrent();
+    load(e.data); state.sample = false;
+    setPlanId(id);
+    result = null; details.clear(); routeLayer.clearLayers(); poiLayer.clearLayers();
+    closeDrawer();
+    save(); renderAll(); fitAll();
+    closeHist();
+    if (state.start && state.stops.length) solve();
+    toast("«" + e.name + "» ochildi." + (archived ? " Oldingi reja Tarixga saqlandi." : ""));
+  }
+  function histDelete(id) {
+    const e = histRead().find((x) => x.id === id);
+    if (!e) return;
+    if (!window.confirm("«" + e.name + "» Tarixdan oʻchirilsinmi?")) return;
+    histWrite(histRead().filter((x) => x.id !== id));
+    if (planId === id) setPlanId(null);
+    renderHist();
+  }
+  function histRename(id, name) {
+    const list = histRead(), e = list.find((x) => x.id === id);
+    if (!e) return;
+    const n = String(name || "").trim().slice(0, 60);
+    if (n) { e.name = n; histWrite(list); }
+  }
+
+  function renderHist() {
+    const list = histRead().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const cur = $("#hs-cur"), ul = $("#hs-list");
+    const bound = !readonly && planId && list.some((x) => x.id === planId);
+    if (readonly) {
+      cur.innerHTML = '<span>Bu ulashilgan safar. Oʻz Tarixingizga nusxa qilib saqlab qoʻyishingiz mumkin.</span><button class="btn sm" type="button" data-hs="save">Tarixga saqlash</button>';
+    } else if (!planHasContent()) cur.innerHTML = "";
+    else if (bound) cur.innerHTML = "<span>Joriy reja Tarixda saqlangan — oʻzgarishlar avtomatik saqlanadi.</span>";
+    else cur.innerHTML = '<span>Joriy reja hali Tarixga saqlanmagan.</span><button class="btn sm" type="button" data-hs="save">Tarixga saqlash</button>';
+    $("#hs-transfer").hidden = readonly || !planHasContent() || !state.start || !state.stops.length;
+    $("#hs-empty").hidden = list.length > 0;
+    ul.innerHTML = list.map((e) => {
+      const d = e.data, names = [d.start && d.start.name].concat((d.stops || []).map((s) => s.name)).filter(Boolean);
+      const meta = [(d.stops || []).length + " ta manzil", e.dist ? Geo.fmtKm(e.dist) : "", histFmtDate(e.updatedAt || e.createdAt || Date.now())].filter(Boolean).join(" · ");
+      const isCur = bound && e.id === planId;
+      return '<li class="hs-item' + (isCur ? " cur" : "") + '" data-id="' + esc(e.id) + '">' +
+        '<button class="hs-main" type="button" data-hs="open"' + (readonly ? " disabled" : "") + "><b>" + esc(e.name) + (isCur ? '<span class="hs-badge">Joriy</span>' : "") + "</b>" +
+        '<span class="hs-route">' + esc(names.join(" → ")) + '</span><span class="hs-meta">' + esc(meta) + "</span></button>" +
+        '<button class="icon-btn" type="button" data-hs="rename" aria-label="Nomini oʻzgartirish" title="Nomini oʻzgartirish"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/></svg></button>' +
+        '<button class="icon-btn" type="button" data-hs="del" aria-label="Oʻchirish" title="Oʻchirish"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></li>';
+    }).join("");
+  }
+
+  function openHist() {
+    renderHist();
+    $("#hist-backdrop").hidden = false; $("#hist-modal").hidden = false;
+    $("#hist-close").focus();
+  }
+  function closeHist() { $("#hist-backdrop").hidden = true; $("#hist-modal").hidden = true; $("#btn-history").focus(); }
+  $("#btn-history").onclick = openHist;
+  $("#hist-close").onclick = closeHist;
+  $("#hist-backdrop").onclick = closeHist;
+  $("#hs-transfer-btn").onclick = () => {
+    const url = location.href.split("#")[0] + "#import=" + b64encode(JSON.stringify(serialize()));
+    copyText(url, "Koʻchirish havolasi nusxalandi — uni boshqa qurilmada oching.");
+  };
+  /** #import=… havolasi: reja shu qurilmaning Tarixiga qoʻshiladi va tahrirlanadigan joriy reja boʻladi. */
+  function importPlan(data) {
+    const archived = archiveCurrent();
+    load(data); state.sample = false;
+    const sig = JSON.stringify(serialize());
+    const same = histRead().find((x) => JSON.stringify(x.data) === sig);
+    const id = same ? same.id : histNewId();
+    if (!same) histUpsert(id, serialize());
+    setPlanId(id);
+    result = null;
+    save();
+    toast("Reja shu qurilmaga koʻchirildi va Tarixga saqlandi." + (archived ? " Oldingi reja ham Tarixda." : ""));
+  }
+  $("#hs-new").onclick = () => { closeHist(); clearAll({ fresh: true }); };
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#hist-modal").hidden && !e.target.closest(".hs-edit")) closeHist(); });
+  $("#hs-cur").addEventListener("click", (e) => { if (e.target.closest('[data-hs="save"]')) histSaveCurrent(); });
+  $("#hs-list").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-hs]"), li = e.target.closest(".hs-item");
+    if (!b || !li) return;
+    const id = li.dataset.id, act = b.dataset.hs;
+    if (act === "open") histOpen(id);
+    else if (act === "del") histDelete(id);
+    else if (act === "rename") {
+      const ent = histRead().find((x) => x.id === id);
+      if (!ent) return;
+      li.innerHTML = '<div class="hs-edit"><input type="text" maxlength="60" autocomplete="off" aria-label="Reja nomi" value="' + esc(ent.name) + '"><button class="btn sm" type="button" data-hs="rename-ok">Saqlash</button></div>';
+      const inp = li.querySelector("input"); inp.focus(); inp.select();
+    } else if (act === "rename-ok") { histRename(id, li.querySelector("input").value); renderHist(); }
+  });
+  $("#hs-list").addEventListener("keydown", (e) => {
+    const inp = e.target.closest && e.target.closest(".hs-edit input");
+    if (!inp) return;
+    if (e.key === "Enter") { e.preventDefault(); histRename(inp.closest(".hs-item").dataset.id, inp.value); renderHist(); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); renderHist(); }
+  });
+
   /* ---------------- Boshlash ---------------- */
 
   function boot() {
@@ -1917,8 +2116,18 @@
         const raw = localStorage.getItem(STORE_KEY);
         if (raw) { load(JSON.parse(raw)); loaded = true; }
       } catch (_) { /* noop */ }
+      try {
+        const pid = localStorage.getItem(PLAN_KEY);
+        if (loaded && pid && histRead().some((x) => x.id === pid)) planId = pid;
+      } catch (_) { /* noop */ }
     }
     if (!loaded) { load(SAMPLE); state.sample = true; }
+    const im = !readonly && location.hash.match(/[#&]import=([A-Za-z0-9_-]+)/);
+    if (im) {
+      try { importPlan(JSON.parse(b64decode(im[1]))); }
+      catch (e) { toast("Koʻchirish havolasini oʻqib boʻlmadi.", "warn"); }
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (_) { /* noop */ }
+    }
     bindOptions();
     renderAll();
     fitAll();
