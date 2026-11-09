@@ -1842,6 +1842,13 @@
     });
   }
 
+  const REPORT_FMT_KEY = "yolnoma.report.fmt";
+  const reportFormat = () => { const r = document.querySelector('input[name="rp-format"]:checked'); return r ? r.value : "full"; };
+  document.querySelectorAll('input[name="rp-format"]').forEach((r) => r.addEventListener("change", () => {
+    try { localStorage.setItem(REPORT_FMT_KEY, reportFormat()); } catch (_) { /* noop */ }
+    buildReport();
+  }));
+
   function buildReport() {
     const np = reportParams();
     const box = $("#rp-msgs");
@@ -1861,7 +1868,9 @@
         geometry: result.geometry, cities: Border.HUBS, params: np.P,
       });
       const now = new Date();
-      reportText = Report.toText(reportRep, { title: "Safar hisoboti", generated: now.toLocaleString("uz-UZ") });
+      reportText = reportFormat() === "short"
+        ? Report.toShortText(reportRep, { yandexDomain: CONFIG.yandexDomain || "yandex.uz" })
+        : Report.toText(reportRep, { title: "Safar hisoboti", generated: now.toLocaleString("uz-UZ") });
       $("#rp-preview").textContent = reportText;
     } catch (e) {
       console.error(e);
@@ -1890,6 +1899,7 @@
     RP.start.value = /^\d{2}:\d{2}$/.test(src.start || "") ? src.start : "10:00";
     RP.end.value = /^\d{2}:\d{2}$/.test(src.end || "") ? src.end : "18:00";
     RP.limit.value = /^\d{2}:\d{2}$/.test(src.limit || "") ? src.limit : "";
+    try { const f = localStorage.getItem(REPORT_FMT_KEY); const r = document.querySelector('input[name="rp-format"][value="' + (f === "short" ? "short" : "full") + '"]'); if (r) r.checked = true; } catch (_) { /* noop */ }
     $("#report-backdrop").hidden = false;
     $("#report-modal").hidden = false;
     buildReport();
@@ -1917,7 +1927,7 @@
     const f = document.createElement("iframe");
     f.style.cssText = "position:fixed;width:0;height:0;border:0;right:0;bottom:0";
     document.body.appendChild(f);
-    f.srcdoc = Report.toHTML(reportRep, { title: "Safar hisoboti" });
+    f.srcdoc = reportFormat() === "short" ? Report.toHTMLShort(reportRep, { title: "Safar hisoboti", yandexDomain: CONFIG.yandexDomain || "yandex.uz" }) : Report.toHTML(reportRep, { title: "Safar hisoboti" });
     f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (_) { toast("Chop etib boʻlmadi."); } setTimeout(() => f.remove(), 60000); };
   };
 

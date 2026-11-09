@@ -339,6 +339,48 @@
     return L.join("\n") + "\n";
   }
 
+  /* ---------- Qisqa koʻrinish: sana, manzil, vaqt va faqat Yandex Karta havolasi ---------- */
+
+  /** Yandex Karta nuqtasi (aniq koordinata boʻyicha). */
+  function yandexLink(stop, domain) {
+    if (!stop || !Number.isFinite(stop.lat) || !Number.isFinite(stop.lon)) return "";
+    const ll = Number(stop.lon).toFixed(6) + "%2C" + Number(stop.lat).toFixed(6);
+    return "https://" + (domain || "yandex.uz") + "/maps/?ll=" + ll + "&z=17&pt=" + ll;
+  }
+
+  /**
+   * Qisqa hisobot: har kunda sana, manzillar (izoh boʻlsa — izohdagi manzil) va vaqt oraligʻi, tagida Yandex havolasi,
+   * tunash joyi belgilanadi. Boshqa maʼlumot (masofa, yoʻl vaqti, eslatmalar) yoʻq.
+   * @param meta {yandexDomain?:string, links?:boolean}
+   */
+  function toShortText(rep, meta) {
+    const m = meta || {}, P = rep.params, out = [];
+    const wantLinks = m.links !== false;
+    for (const day of rep.days) {
+      const lines = [];
+      const stopBlock = (sr) => {
+        const s = sr.stop, label = (s.note && String(s.note).trim()) || s.name;
+        const blk = [sr.n + "-manzil: " + label + " — " + hhmm(sr.workStart) + "–" + hhmm(sr.workEnd)];
+        const y = wantLinks ? yandexLink(s, m.yandexDomain) : "";
+        if (y) blk.push("Yandex: " + y);
+        return blk;
+      };
+      let prevStop = false;
+      for (const it of day.items) {
+        if (it.kind === "depart") { lines.push("Joʻnash " + hhmm(it.time)); prevStop = false; }
+        else if (it.kind === "stop" && !it.sr.postponed) { if (prevStop) lines.push(""); lines.push.apply(lines, stopBlock(it.sr)); prevStop = true; }
+        else if (it.kind === "work2") { if (prevStop) lines.push(""); lines.push.apply(lines, stopBlock(it.sr)); prevStop = true; }
+        else if (it.kind === "night") { lines.push(" ( " + (it.e.kind === "road" ? "yoʻlda qolinadi" : "mehmonxonaga qolinadi") + " )"); prevStop = false; }
+        else if (it.kind === "return") { lines.push("Qaytish — " + hhmm(it.time) + " da yetib boriladi"); prevStop = false; }
+        else if (it.kind === "end") { lines.push("Safar tugashi — " + hhmm(it.time)); prevStop = false; }
+      }
+      if (!lines.length) continue;
+      if (out.length) out.push("");
+      out.push(day.dmy); out.push.apply(out, lines);
+    }
+    return out.join("\n") + "\n";
+  }
+
   /* ---------- HTML (chop etish / PDF) ---------- */
 
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
@@ -377,6 +419,24 @@
       "</style></head><body>" + html.join("\n") + "</body></html>";
   }
 
-  global.Report = { normalizeParams, schedule, toText, toHTML, dateInfo, hhmm, fmtDur, fmtDurFull, fmtKm, toMin };
+  function toHTMLShort(rep, meta) {
+    const m = meta || {};
+    const body = toShortText(rep, m).split("\n").map((line) => {
+      if (!line.trim()) return "";
+      if (/^\d{2}\.\d{2}\.\d{4}$/.test(line)) return "<h2>" + esc(line) + "</h2>";
+      const mm = /^Yandex: (https?:\/\/\S+)$/.exec(line);
+      if (mm) return '<p class="y"><a href="' + esc(mm[1]) + '">Yandex Karta</a> <span>' + esc(mm[1]) + "</span></p>";
+      if (/^ \(/.test(line)) return '<p class="night">' + esc(line.trim()) + "</p>";
+      return "<p>" + esc(line) + "</p>";
+    }).join("\n");
+    return '<!doctype html><html lang="uz"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+      "<title>" + esc(m.title || "Safar hisoboti") + "</title><style>" +
+      "body{font:15px/1.55 system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#111c33;max-width:780px;margin:24px auto;padding:0 16px}" +
+      "h2{font-size:17px;margin:18px 0 4px;color:#1f4fa3;border-top:2px solid #1f4fa3;padding-top:6px}p{margin:3px 0}" +
+      ".y span{color:#5a6880;font-size:12px;word-break:break-all}.night{margin:8px 0;padding:3px 8px;background:#fbeee3;border-radius:6px;color:#8a3f10}" +
+      "@media print{body{margin:0;max-width:none}}</style></head><body>" + body + "</body></html>";
+  }
+
+  global.Report = { normalizeParams, schedule, toText, toHTML, toShortText, toHTMLShort, yandexLink, dateInfo, hhmm, fmtDur, fmtDurFull, fmtKm, toMin };
   if (typeof module !== "undefined") module.exports = global.Report;
 })(typeof window !== "undefined" ? window : globalThis);

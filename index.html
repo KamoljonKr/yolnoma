@@ -320,6 +320,10 @@
         <label class="field"><span>Har manzilda turish, daq</span><input type="number" id="rp-stay" min="0" max="1440" step="15"></label>
         <label class="field"><span>Haydashni tugatish (boʻsh = ish tugashi)</span><input type="time" id="rp-limit"></label>
       </div>
+      <div class="rp-format" role="radiogroup" aria-label="Hisobot koʻrinishi">
+        <label><input type="radio" name="rp-format" value="full" checked> Toʻliq hisobot</label>
+        <label><input type="radio" name="rp-format" value="short"> Qisqa: manzil, vaqt va Yandex Karta havolasi</label>
+      </div>
       <div class="rp-msgs" id="rp-msgs" aria-live="polite"></div>
       <pre class="rp-preview" id="rp-preview" tabindex="0"></pre>
     </div>

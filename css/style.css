@@ -467,6 +467,8 @@ code, .mono { font-family: var(--f-mono); font-size: 12.5px; }
 .modal-foot { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--line); }
 .rp-hint { margin: 0; font-size: 13px; }
 .rp-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.rp-format { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0 2px; font-size: 14px; }
+.rp-format label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .rp-msgs:empty { display: none; }
 .rp-msg { font-size: 13px; padding: 7px 10px; border-radius: 8px; margin-bottom: 4px; }
 .rp-msg.err { background: var(--warn-soft); color: var(--warn); }
